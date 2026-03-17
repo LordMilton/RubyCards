@@ -1,19 +1,85 @@
 class Card
+  @@HighlightSizePx = 1
 
   attr_reader :suit
   attr_reader :value
+  attr_reader :selected
 
   def initialize(suit, value, cardDrawer)
     @suit = suit
     @value = value
     @cardDrawer = cardDrawer
+    @selected = false
+    @selectable = false
+
+    @topLeftX = 0
+    @topLeftY = 0
+    @bottomRightX = 0
+    @bottomRightY = 0
+
+    @image = nil
   end
 
   def hidden?
     return(@suit == nil && @value == nil)
   end
 
-  def getImage
-    return(@cardDrawer.getCardImage(self))
+  def makeSelectable(selectable)
+    @selectable = selectable
   end
+
+  def clicked(clickX, clickY)
+    clickWithinBounds = false
+    if(pointWithinBounds(clickX, clickY))
+      clickWithinBounds = true
+      toggleSelected()
+    end
+
+    return(clickWithinBounds)
+  end
+
+  def pointWithinBounds(x, y)
+    return(@topLeftX <= x && @bottomRightX >= x && @topLeftY <= y && @bottomRightY >= y)
+  end
+  private :pointWithinBounds
+
+  def toggleSelected()
+    if(@selectable)
+      @selected = !@selected
+    end
+  end
+
+  def getImage
+    if(@image == nil)
+      @image = @cardDrawer.getCardImage(self)
+    end
+    return(@image)
+  end
+
+  def setDrawingInfo(topLeftX, topLeftY, width, height)
+    @topLeftX = topLeftX
+    @topLeftY = topLeftY
+    @bottomRightX = topLeftX + width
+    @bottomRightY = topLeftY + height
+  end
+
+  def draw
+    cardImage = getImage
+    if(@selected)
+      drawRectangle(@cardDrawer.getHighlightImage, @topLeftX - @@HighlightSizePx, @topLeftY - @@HighlightSizePx, @bottomRightX + @@HighlightSizePx, @bottomRightY + @@HighlightSizePx)
+    end
+    drawRectangle(cardImage, @topLeftX, @topLeftY, @bottomRightX, @bottomRightY)
+  end
+
+  def drawRectangle(image, topLeftX, topLeftY, bottomRightX, bottomRightY)
+    baseColor = Gosu::Color.argb(0xff_ffffff)
+    image.draw_as_quad(
+      topLeftX, topLeftY, baseColor,
+      bottomRightX, topLeftY, baseColor,
+      bottomRightX, bottomRightY, baseColor,
+      topLeftX, bottomRightY, baseColor,
+      0
+    )
+  end
+  private :drawRectangle
 end

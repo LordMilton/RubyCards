@@ -3,15 +3,16 @@ class Hand
 
   def initialize
     @cards = []
+    @selectable = false
 
     # Drawing values
-    @topLeftX = nil
-    @topLeftY = nil
-    @bottomRightX = nil
-    @bottomRightY = nil
-    @startX = nil
-    @cardSpacing = nil
-    @cardScaling = nil
+    @topLeftX = 0
+    @topLeftY = 0
+    @bottomRightX = 0
+    @bottomRightY = 0
+    @startX = 0
+    @cardSpacing = 0
+    @cardScaling = 0
   end
 
   def setHandLocation(topLeftX, topLeftY, bottomRightX, bottomRightY)
@@ -22,26 +23,57 @@ class Hand
     calculateDrawing(topLeftX, topLeftY, bottomRightX, bottomRightY)
   end
 
+  def makeSelectable(selectable)
+    @selectable = selectable
+    @cards.each do |card|
+      card.makeSelectable(@selectable)
+    end
+  end
+
+  def clicked(clickX, clickY)
+    clickWithinBounds = false
+    if(pointWithinBounds(clickX, clickY))
+      clickWithinBounds = true
+      if(@selectable)
+        @cards.reverse_each do |card|
+          if(card.clicked(clickX, clickY))
+            break
+          end
+        end
+      end
+    end
+    return(clickWithinBounds)
+  end
+
+  def pointWithinBounds(x, y)
+    return(
+      (@topLeftX != nil && @topLeftX <= x) &&
+      (@bottomRightX != nil && @bottomRightX >= x) &&
+      (@topLeftY != nil && @topLeftY <= y) &&
+      (@bottomRightY != nil && @bottomRightY >= y)
+    )
+  end
+  private :pointWithinBounds
+
   def select(index)
     return @cards[index] || nil
   end
 
   def add(card)
-    calculateDrawingSameLocation
+    card.makeSelectable(@selectable)
     @cards.append(card)
+    calculateDrawingSameLocation()
   end
 
   def remove(index)
     toReturn = @cards.delete_at(index)
-    calculateDrawingSameLocation
+    calculateDrawingSameLocation()
     return toReturn
   end
 
   def draw
-    nextX = @startX
     @cards.each do |card|
-      card.getImage.draw(nextX, @topLeftY, 0, @cardScaling, @cardScaling)
-      nextX += @cardSpacing
+      card.draw
     end
   end
 
@@ -51,6 +83,10 @@ class Hand
   private :calculateDrawingSameLocation
 
   def calculateDrawing(topLeftX, topLeftY, bottomRightX, bottomRightY)
+    if(topLeftX == nil || topLeftY == nil || bottomRightX == nil || bottomRightY == nil)
+      return
+    end
+
     if(@cards.empty?)
       @startX = 0
       @cardSpacing = 0
@@ -62,20 +98,30 @@ class Hand
       centerY = (topLeftY + bottomRightY) / 2
       handDrawHeight = bottomRightY - topLeftY
       handDrawWidth = bottomRightX - topLeftX
-      @cardScaling = handDrawHeight*1.0 / sampleCard.height
+      cardScaling = handDrawHeight*1.0 / sampleCard.height
 
-      cardWidth = sampleCard.width * @cardScaling
-      cardHeight = sampleCard.height * @cardScaling
+      @cardWidth = sampleCard.width * cardScaling
+      @cardHeight = sampleCard.height * cardScaling
 
-      if(cardWidth * @cards.length < handDrawWidth)
-        @cardSpacing = cardWidth
-        @startX = centerX - (cardWidth * @cards.length / 2.0)
+      if(@cardWidth * @cards.size < handDrawWidth)
+        @cardSpacing = @cardWidth
+        @startX = centerX - (@cardWidth * @cards.size / 2.0)
       else
-        @cardSpacing = handDrawWidth*1.0 / @cards.length
+        @cardSpacing = handDrawWidth*1.0 / @cards.size
         @startX = topLeftX
       end
+
+      updateCardLocations()
     end
   end
   private :calculateDrawing
+
+  def updateCardLocations
+    nextX = @startX
+    @cards.each do |card|
+      card.setDrawingInfo(nextX, @topLeftY, @cardWidth, @cardHeight)
+      nextX += @cardSpacing
+    end
+  end
 
 end
