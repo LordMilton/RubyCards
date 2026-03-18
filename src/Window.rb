@@ -8,25 +8,22 @@ class GameWindow < Gosu::Window
 
   attr_writer :cardDrawer
 
-  def initialize
+  def initialize(gm)
     super(1920,1080)
     self.resizable = true
     self.caption = "Cards"
-    @cardDrawer = CardDrawer.new("../resources/cards")
-    @hand = Hand.new()
-    x = 0
-    @hand.setHandLocation(200, 475, 1000, 650)
-    while x < 15 do
-      @hand.add(Card.new("spades", 4, @cardDrawer))
-      x += 1
-    end
-    @hand.makeSelectable(true)
+
+    @gm = gm
+
     @timeNow = Time.new
     @timeLast = Time.new
+    @frameInSecond = 0
+    @playerOrder = [:S, :N, :E, :W]
+    @playerOrderNum = 0
   end
 
   def draw
-    @hand.draw
+    @gm.drawGame()
 
     if(@showFps)
       drawFps()
@@ -41,7 +38,11 @@ class GameWindow < Gosu::Window
   private :drawFps
 
   def update
-    
+    @frameInSecond = (@frameInSecond + 1) % 60
+    if(@frameInSecond == 0)
+      @gm.setFrontPlayer(@playerOrder[@playerOrderNum % @playerOrder.size])
+      @playerOrderNum = (@playerOrderNum + 1) % @playerOrder.size
+    end
   end
 
   def close
@@ -50,9 +51,7 @@ class GameWindow < Gosu::Window
 
   def button_down(id)
     if(id == @@LmbId)
-      @hand.clicked(mouse_x(), mouse_y())
+      @gm.clicked(mouse_x(), mouse_y())
     end
   end
 end
-
-GameWindow.new.show()
