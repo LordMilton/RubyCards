@@ -15,12 +15,17 @@ class Hand
     @cardScaling = 0
   end
 
-  def setHandLocation(topLeftX, topLeftY, bottomRightX, bottomRightY)
-    @topLeftX = topLeftX
-    @topLeftY = topLeftY
-    @bottomRightX = bottomRightX
-    @bottomRightY = bottomRightY
-    calculateDrawing(topLeftX, topLeftY, bottomRightX, bottomRightY)
+  # Expected order [topLeftX, topLeftY, bottomRightX, bottomRightY]
+  def setHandLocation(position)
+    if(position.respond_to?("each") && position.respond_to?("size") && position.size == 4)
+      @topLeftX = position[0]
+      @topLeftY = position[1]
+      @bottomRightX = position[2]
+      @bottomRightY = position[3]
+      calculateDrawing(@topLeftX, @topLeftY, @bottomRightX, @bottomRightY)
+    else
+      puts("Hand.setHandLocation given invalid argument: not iterable or not containing 4 elements")
+    end
   end
 
   def makeSelectable(selectable)

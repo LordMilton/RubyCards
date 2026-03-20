@@ -1,7 +1,7 @@
 require "gosu"
-require_relative "cards/Card"
-require_relative "cards/CardDrawer"
-require_relative "cards/Hand"
+require_relative "../cards/Card"
+require_relative "../cards/CardDrawer"
+require_relative "../cards/Hand"
 
 class GameWindow < Gosu::Window
   @@LmbId = 256

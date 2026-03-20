@@ -1,6 +1,6 @@
 require "gosu"
 require_relative "../cards/Hand"
-require_relative "../Window.rb"
+require_relative "./Window.rb"
 
 LOCATION = {
   S: 0,
@@ -19,7 +19,8 @@ class GameMaster
   @@PlayerHandHeight = 150
   @@PlayerHandWidth = 350
 
-  def initialize
+  def initialize(cardDrawer)
+    @cardDrawer = cardDrawer
     # Assumes a 1920,1080 screen, can adjust from there by ratio of new screen sizes
     # TODO: Allow different screen sizes
     @playerHandLocations = {
@@ -28,14 +29,63 @@ class GameMaster
       numToDirectionHash(2) => [750,                    50,                      750+@@PlayerHandWidth, 50+@@PlayerHandHeight],
       numToDirectionHash(3) => [1800-@@PlayerHandWidth, 450,                     1800,                  450+@@PlayerHandHeight]
     }
+    @deckLocation = [700, 450, 710, 450+@@PlayerHandHeight]
+    @discardLocation = [850, 450, 1000, 450+@@PlayerHandHeight]
     @frontPlayer = numToDirectionHash(0)
     @playerHands = {}
+  end
+
+  def createDeck(size)
+    @deck = Hand.new
+    numCards = size
+    while numCards > 0 do
+      @deck.add(Card.new(nil, nil, @cardDrawer))
+      numCards -= 1
+    end
+    @deck.setHandLocation(@deckLocation)
+  end
+
+  def drawFromDeck(numToDraw = 1)
+    return @deck.remove(0)
+  end
+
+  def makeDeckSelectable(selectable)
+    @deck.makeSelectable(selectable)
+  end
+
+  def createDiscard(cards = Hand.new)
+    cards.setHandLocation(@discardLocation)
+    @discard = cards
+  end
+
+  def addToDiscard(card)
+    @discard.add(cards)
+  end
+
+  def makeDiscardSelectable(selectable)
+    @discard.makeSelectable(selectable)
   end
 
   def createPlayerHand(hashDir, hand = Hand.new)
     if(playerAvailable?(hashDir))
       @playerHands[hashDir] = hand
       repositionHands()
+      return true
+    end
+    return false
+  end
+
+  def addToHand(hashDir, card)
+    if(playerAvailable?(hashDir))
+      @playerHands[hashDir].add(card)
+      return true
+    end
+    return false
+  end
+
+  def removeFromHand(hashDir, index)
+    if(playerAvailable?(hashDir))
+      @playerHands[hashDir].add(card)
       return true
     end
     return false
@@ -51,7 +101,6 @@ class GameMaster
       @playerHandLocations = newPlayerHandLocations
       repositionHands()
       @frontPlayer = hashDir
-      puts("front player set to #{@frontPlayer}")
       return true
     end
     return false
@@ -60,7 +109,7 @@ class GameMaster
   def repositionHands
     @playerHands.each do |handKey, hand|
       location = @playerHandLocations[handKey]
-      hand.setHandLocation(location[0], location[1], location[2], location[3])
+      hand.setHandLocation(location)
     end
   end
   private :repositionHands
@@ -74,6 +123,12 @@ class GameMaster
     @playerHands.each do |handKey, hand|
       hand.draw
     end
+    if(@deck != nil)
+      @deck.draw
+    end
+    if(@discard != nil)
+      @discard.draw
+    end
   end
 
   def clicked(mouseX, mouseY)
@@ -84,9 +139,9 @@ class GameMaster
 
 end
 
-gm = GameMaster.new()
-sampleHands = {S: nil}
 sampleCardDrawer = CardDrawer.new("../../resources/cards")
+gm = GameMaster.new(sampleCardDrawer)
+sampleHands = {S: nil}
 handNum = 2
 sampleHands.each do |handKey, hand|
   numCards = 10
@@ -100,5 +155,14 @@ sampleHands.each do |handKey, hand|
   gm.createPlayerHand(handKey, newHand)
   handNum += 1
 end
+
+gm.createDeck(52)
+discard = Hand.new
+discardSize = 6
+while discardSize > 0 do
+  discard.add(Card.new("hearts", 8, sampleCardDrawer))
+  discardSize -= 1
+end
+gm.createDiscard(discard)
 
 window = GameWindow.new(gm).show()
