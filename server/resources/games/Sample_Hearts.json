@@ -1,0 +1,83 @@
+{
+  "game": {
+    "name": "Sample Hearts",
+    "deck": {
+      "cards": [
+        "spades_2",
+        "hearts_2"
+      ],
+      "visible": false
+    },
+    "discard": {
+      "visible": false
+    },
+    "players": [
+      "N",
+      "E",
+      "S",
+      "W"
+    ]
+  },
+  "step_1": {
+    "action": "setup",
+    "change_1": {
+      "action": "reset_hand"
+    },
+    "change_2": {
+      "action": "reset_deck"
+    },
+    "change_3": {
+      "action": "draw"
+    }
+  },
+  "step_2": {
+    "action": "actionable",
+    "actionables": {
+      "action_1": {
+        "action": "play",
+        "count": 1
+      }
+    }
+  },
+  "step_3": {
+    "action": "repeat_until",
+    "from_step": 1,
+    "change": "next_player",
+    "condition": {
+      "type": "occurrences",
+      "comparison": 4
+    }
+  },
+  "step_4": {
+    "action": "assign_trick",
+    "remove_trick": true
+  },
+  "step_5": {
+    "action": "repeat_until",
+    "from_step": 1,
+    "condition": {
+      "type": "hand_size",
+      "comparison": 0
+    }
+  },
+  "step_6": {
+    "action": "score",
+    "mechanism": 1
+  },
+  "step_7": {
+    "action": "repeat_until",
+    "from_step": 0,
+    "change": "next_player",
+    "condition": {
+      "type": "score",
+      "comparison": 100
+    }
+  },
+  "step_8": {
+    "action": "assign_winner",
+    "condition": {
+      "type": "score",
+      "comparison": "lowest"
+    }
+  }
+}
