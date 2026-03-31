@@ -14,7 +14,7 @@ class CardDrawer
     if(card.hidden?)
       cardFileName = "back.jpg"
     else
-      cardFileName = card.suit.downcase.concat("_",card.value.to_s,".jpg")
+      cardFileName = "#{card.suit.downcase}_#{card.value}.jpg"
     end
     
     cardFile = cardFile.concat("/",cardFileName)
@@ -24,7 +24,7 @@ class CardDrawer
   def getHighlightImage
     cardFile = @cardImagesDir.dup
     if(@highlightImage == nil)
-      @highlightImage = Gosu::Image.new(cardFile.concat("/","../",@@HighlightImageName))
+      @highlightImage = Gosu::Image.new("#{cardFile}/../#{@@HighlightImageName}")
     end
     return(@highlightImage)
   end

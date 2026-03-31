@@ -1,6 +1,7 @@
 require "gosu"
+require_relative "./Button"
 require_relative "../cards/Hand"
-require_relative "./Window.rb"
+require_relative "./Window"
 
 LOCATION = {
   S: 0,
@@ -17,7 +18,10 @@ end
 class GameMaster
   @@BaseScreenSize = [1920,1080]
   @@PlayerHandHeight = 150
-  @@PlayerHandWidth = 350
+  @@PlayerHandWidth = 400
+  @@ButtonHeight = 40
+  @@ButtonWidth = 150
+  @@ButtonHeightBuffer = 10
 
   def initialize(cardDrawer)
     @cardDrawer = cardDrawer
@@ -27,12 +31,20 @@ class GameMaster
       numToDirectionHash(0) => [750,                    1020-@@PlayerHandHeight, 750+@@PlayerHandWidth, 1020],
       numToDirectionHash(1) => [50,                     450,                     50+@@PlayerHandWidth,  450+@@PlayerHandHeight],
       numToDirectionHash(2) => [750,                    50,                      750+@@PlayerHandWidth, 50+@@PlayerHandHeight],
-      numToDirectionHash(3) => [1800-@@PlayerHandWidth, 450,                     1800,                  450+@@PlayerHandHeight]
+      numToDirectionHash(3) => [1870-@@PlayerHandWidth, 450,                     1870,                  450+@@PlayerHandHeight]
     }
-    @deckLocation = [700, 450, 710, 450+@@PlayerHandHeight]
-    @discardLocation = [850, 450, 1000, 450+@@PlayerHandHeight]
+    @deckLocation = [700, 450, 775, 450+@@PlayerHandHeight]
+    @discardLocation = [850, 450, 1200, 450+@@PlayerHandHeight]
     @frontPlayer = numToDirectionHash(0)
     @playerHands = {}
+
+    @buttonLabels = ["Draw", "Play", "Discard"]
+    @buttons = {}
+    buttonNum = 1
+    @buttonLabels.each do |label|
+      @buttons[label] = Button.new(label, [1170, 870 + ((@@ButtonHeight + @@ButtonHeightBuffer) * (buttonNum-1)), 1170 + @@ButtonWidth, 870 + ((@@ButtonHeight + @@ButtonHeightBuffer) * (buttonNum-1)) + @@ButtonHeight])
+      buttonNum += 1
+    end
   end
 
   def createDeck(size)
@@ -119,7 +131,7 @@ class GameMaster
   end
   private :playerAvailable?
 
-  def drawGame
+  def drawGame(mouseX, mouseY)
     @playerHands.each do |handKey, hand|
       hand.draw
     end
@@ -128,6 +140,9 @@ class GameMaster
     end
     if(@discard != nil)
       @discard.draw
+    end
+    @buttons.each_value do |btn|
+      btn.draw(mouseX, mouseY)
     end
   end
 
@@ -139,30 +154,32 @@ class GameMaster
 
 end
 
-sampleCardDrawer = CardDrawer.new("../../resources/cards")
-gm = GameMaster.new(sampleCardDrawer)
-sampleHands = {S: nil}
-handNum = 2
-sampleHands.each do |handKey, hand|
-  numCards = 10
-  newHand = Hand.new()
-  newHand.makeSelectable(true)
-  while numCards > 0 do
-    newHand.add(Card.new("spades", handNum, sampleCardDrawer))
-    numCards -= 1
+if __FILE__ == $0
+  sampleCardDrawer = CardDrawer.new("../../resources/cards")
+  gm = GameMaster.new(sampleCardDrawer)
+  sampleHands = {S: nil}
+  handNum = 2
+  sampleHands.each do |handKey, hand|
+    numCards = 10
+    newHand = Hand.new()
+    newHand.makeSelectable(true)
+    while numCards > 0 do
+      newHand.add(Card.new("spades", handNum, sampleCardDrawer))
+      numCards -= 1
+    end
+    sampleHands[handKey] = newHand
+    gm.createPlayerHand(handKey, newHand)
+    handNum += 1
   end
-  sampleHands[handKey] = newHand
-  gm.createPlayerHand(handKey, newHand)
-  handNum += 1
-end
 
-gm.createDeck(52)
-discard = Hand.new
-discardSize = 6
-while discardSize > 0 do
-  discard.add(Card.new("hearts", 8, sampleCardDrawer))
-  discardSize -= 1
-end
-gm.createDiscard(discard)
+  gm.createDeck(52)
+  discard = Hand.new
+  discardSize = 6
+  while discardSize > 0 do
+    discard.add(Card.new("hearts", 8, sampleCardDrawer))
+    discardSize -= 1
+  end
+  gm.createDiscard(discard)
 
-window = GameWindow.new(gm).show()
+  window = GameWindow.new(gm).show()
+end

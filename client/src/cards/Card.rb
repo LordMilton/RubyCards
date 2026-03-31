@@ -5,6 +5,9 @@ class Card
   attr_reader :value
   attr_reader :selected
 
+  # @param suit:String Suit of the card
+  # @param value:String Value of the card (string accounts for non-numeral cards)
+  # @param cardDrawer:CardDrawer Object for fetching card-related images
   def initialize(suit, value, cardDrawer)
     @suit = suit
     @value = value

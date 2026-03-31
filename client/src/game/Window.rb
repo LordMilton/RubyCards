@@ -23,7 +23,7 @@ class GameWindow < Gosu::Window
   end
 
   def draw
-    @gm.drawGame()
+    @gm.drawGame(mouse_x(), mouse_y())
 
     if(@showFps)
       drawFps()
