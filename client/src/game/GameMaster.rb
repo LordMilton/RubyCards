@@ -1,6 +1,8 @@
 require "gosu"
+require_relative "../Logger"
 require_relative "./Button"
 require_relative "../cards/Hand"
+require_relative "./Locator"
 require_relative "./Window"
 
 LOCATION = {
@@ -10,12 +12,21 @@ LOCATION = {
   E: 3
 }
 
+DEFAULT_NAMES = {
+  S: "South",
+  W: "West",
+  N: "North",
+  E: "East"
+}
+
 def numToDirectionHash(num)
   dirs = LOCATION.keys
   return dirs[num % dirs.size]
 end
 
 class GameMaster
+  include MyLogger
+
   @@BaseScreenSize = [1920,1080]
   @@PlayerHandHeight = 150
   @@PlayerHandWidth = 400
@@ -25,25 +36,22 @@ class GameMaster
 
   def initialize(cardDrawer)
     @cardDrawer = cardDrawer
+    @playerPositionsClockwiseFromFront = [numToDirectionHash(0), numToDirectionHash(1), numToDirectionHash(2), numToDirectionHash(3)]
     # Assumes a 1920,1080 screen, can adjust from there by ratio of new screen sizes
     # TODO: Allow different screen sizes
-    @playerHandLocations = {
-      numToDirectionHash(0) => [750,                    1020-@@PlayerHandHeight, 750+@@PlayerHandWidth, 1020],
-      numToDirectionHash(1) => [50,                     450,                     50+@@PlayerHandWidth,  450+@@PlayerHandHeight],
-      numToDirectionHash(2) => [750,                    50,                      750+@@PlayerHandWidth, 50+@@PlayerHandHeight],
-      numToDirectionHash(3) => [1870-@@PlayerHandWidth, 450,                     1870,                  450+@@PlayerHandHeight]
-    }
-    @deckLocation = [700, 450, 775, 450+@@PlayerHandHeight]
-    @discardLocation = [850, 450, 1200, 450+@@PlayerHandHeight]
+    @locator = Locator.new(@@BaseScreenSize)
+
+    @playerHandLocations = @locator.getPlayerHandLocations(@playerPositionsClockwiseFromFront)
+    @deckLocation = @locator.getDeckLocation
+    @discardLocation = @locator.getDiscardLocation
     @frontPlayer = numToDirectionHash(0)
     @playerHands = {}
+    @playerNamesDrawers = {}
 
     @buttonLabels = ["Draw", "Play", "Discard"]
-    @buttons = {}
-    buttonNum = 1
-    @buttonLabels.each do |label|
-      @buttons[label] = Button.new(label, [1170, 870 + ((@@ButtonHeight + @@ButtonHeightBuffer) * (buttonNum-1)), 1170 + @@ButtonWidth, 870 + ((@@ButtonHeight + @@ButtonHeightBuffer) * (buttonNum-1)) + @@ButtonHeight])
-      buttonNum += 1
+    @buttons = @locator.getButtonLocations(@buttonLabels)
+    @buttons.each do |name, location|
+      @buttons[name] = Button.new(name, location)
     end
   end
 
@@ -79,7 +87,7 @@ class GameMaster
   end
 
   def createPlayerHand(hashDir, hand = Hand.new)
-    if(playerAvailable?(hashDir))
+    if(playerSlotExists?(hashDir))
       @playerHands[hashDir] = hand
       repositionHands()
       return true
@@ -88,7 +96,7 @@ class GameMaster
   end
 
   def addToHand(hashDir, card)
-    if(playerAvailable?(hashDir))
+    if(playerSlotExists?(hashDir))
       @playerHands[hashDir].add(card)
       return true
     end
@@ -96,7 +104,7 @@ class GameMaster
   end
 
   def removeFromHand(hashDir, index)
-    if(playerAvailable?(hashDir))
+    if(playerSlotExists?(hashDir))
       @playerHands[hashDir].add(card)
       return true
     end
@@ -104,36 +112,41 @@ class GameMaster
   end
 
   def setFrontPlayer(hashDir)
-    if(playerAvailable?(hashDir))
+    if(playerSlotExists?(hashDir))
       difference = (LOCATION[hashDir] - LOCATION[@frontPlayer])
-      newPlayerHandLocations = {}
-      @playerHandLocations.each do |key, location|
-        newPlayerHandLocations[numToDirectionHash(LOCATION[key] + difference)] = location
-      end
-      @playerHandLocations = newPlayerHandLocations
-      repositionHands()
+      @playerPositionsClockwiseFromFront.map! { |pos| numToDirectionHash(LOCATION[pos] + difference) }
+      @playerHandLocations = @locator.getPlayerHandLocations(@playerPositionsClockwiseFromFront)
       @frontPlayer = hashDir
+      repositionHands()
       return true
     end
     return false
   end
 
   def repositionHands
-    @playerHands.each do |handKey, hand|
-      location = @playerHandLocations[handKey]
-      hand.setHandLocation(location)
+    dirNamesHash = {}
+    @playerHandLocations.each do |handKey, location|
+      dirNamesHash[handKey] = DEFAULT_NAMES[handKey]
+      hand = @playerHands[handKey]
+      if(hand != nil)
+        hand.setHandLocation(location)
+      end
     end
+    @playerNamesDrawers = @locator.getPlayerNameDrawers(dirNamesHash)
   end
   private :repositionHands
 
-  def playerAvailable?(hashDir)
+  def playerSlotExists?(hashDir)
     return @playerHandLocations.has_key?(hashDir)
   end
-  private :playerAvailable?
+  private :playerSlotExists?
 
   def drawGame(mouseX, mouseY)
-    @playerHands.each do |handKey, hand|
+    @playerHands.each_value do |hand|
       hand.draw
+    end
+    @playerNamesDrawers.each do |dirKey, drawFun|
+      drawFun.call(DEFAULT_NAMES[dirKey])
     end
     if(@deck != nil)
       @deck.draw
