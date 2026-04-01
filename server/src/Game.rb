@@ -10,6 +10,7 @@ class Game
 
   # @param gamefile The filename for the instruction set (excluding the .json)
   def initialize(gameFile)
+    @gameStarted = false
     @gameInstructions = JSON.parse((IO.read("#{@@GamesFolder}#{gameFile}")).gsub(/\r/," ").gsub(/\n/," "))
     @finalInstructionStep = 0
     @players = {}
@@ -25,32 +26,21 @@ class Game
     @repeatIncrementers = {}
 
     # Message queues
-    @outgoingMsgQ = {}
-    @incomingMsgQ = {}
+    # TODO mutex?
+    @outgoingMsgQ = []
 
     initializeGame()
   end
 
-  def initializeGame()
-    initInstructions = @gameInstructions["game"]
-    @startingDeck = initInstructions["deck"]["cards"]
-    @deck.replace(@startingDeck)
-    initInstructions["players"].each do |player|
-      @players[player] = nil
-      @playerScores[player] = 0
-      @hands[player] = []
-    end
-  end
-
   def runGame()
-    instructions = JSON.parse(IO.read(instructionFile))
+    @gameStarted = true
     gameComplete = false
 
-    presetup(instructions) # Sets repeatIncrementers and finalInstructionStep
+    presetup(@gameInstructions) # Sets repeatIncrementers and finalInstructionStep
 
     while !gameComplete do
       if(@curStep <= @finalInstructionStep)
-        runStep(instructions["#{@@StepPrefix}#{step}"])
+        runStep(@gameInstructions["#{@@StepPrefix}#{step}"])
       else
         gameComplete = true
       end
@@ -76,6 +66,108 @@ class Game
     end
   end
 
+  # @param websocket The websocket connection to the player
+  def addPlayer(websocket, playerDir = nil)
+    if(playerDir != nil)
+      logger.debug("Adding new player with requested direction: #{playerDir}")
+    end
+
+    # Determine player's seat
+    finalPlayerDir = nil
+    if(playerDir != nil && @players.any?{ |player| player == playerDir })
+      @players[playerDir] = websocket
+      finalPlayerDir = playerDir
+    elsif(playerDir == nil)
+      @players.each do |key,value|
+        if(value == nil)
+          @players[key] = websocket
+          finalPlayerDir = key
+          break
+        end
+      end
+
+      if(finalPlayerDir == nil)
+        logger.error("New client tried to join, but there's no room!")
+      end
+    else
+      logger.error("New client connection provided invalid player direction")
+    end
+    logger.info("New client set to player position: #{finalPlayerDir}")
+
+    if(finalPlayerDir != nil)
+      @playerCount += 1
+      msg = {"type": "set_player_location", "location": finalPlayerDir}
+      addOutgoingMessage(MessageBuilder.buildActionMessage(msg), [finalPlayerDir])
+      defineWebsocketResponses(websocket, finalPlayerDir)
+
+      if(!@gameStarted && @playerCount == @players.keys.size)
+        runGame()
+      end
+    end
+  end
+
+  def tick()
+    tempOutgoingMsgQ = @outgoingMsgQ
+    @outgoingMsgQ = []
+    tempOutgoingMsgQ.each do |item|
+      msg = item[0]
+      receivingPlayers = item[1]
+      sendMessage(msg, receivingPlayers)
+    end
+  end
+
+  def receivedMessage(msg, player)
+    case msg["action"]
+    when "draw"
+      logger.warning("Received message with unhandled action type #{msg["action"]}")
+    when "play"
+      logger.warning("Received message with unhandled action type #{msg["action"]}")
+    when "discard"
+      logger.warning("Received message with unhandled action type #{msg["action"]}")
+    end
+  end
+
+  def sendMessage(msg, receivingPlayers)
+    logger.info("Sending message to #{receivingPlayers}")
+    receivingPlayers.each do |player|
+      logger.debug("Sending message to #{player}: #{msg}")
+      @players[player].send(msg)
+    end
+  end
+
+  private
+
+  def initializeGame()
+    initInstructions = @gameInstructions["game"]
+    @startingDeck = initInstructions["deck"]["cards"]
+    @deck.replace(@startingDeck)
+    initInstructions["players"].each do |player|
+      @players[player] = nil
+      @playerScores[player] = 0
+      @hands[player] = []
+    end
+  end
+  
+  def addOutgoingMessage(msg, receivingPlayers)
+    @outgoingMsgQ.push([msg, receivingPlayers])
+  end
+  
+  def defineWebsocketResponses(ws, playerDir)
+    ws.onmessage do |msg, type|
+      logger.info("Received message from playerDir #{playerDir}")
+      logger.debug("#{playerDir} message: #{msg}")
+      receivedMessage(msg, playerDir)
+    end
+
+    ws.onclose do
+      @players[playerDir] = nil
+      @playerCount -= 1
+      logger.info("Player in seat #{playerDir} disconnected")
+    end
+  end
+
+  # Step helpers
+  
   # @param stepHash Instructions for the step as a hash (the highest level should always be "step_x" where x is the number of the step)
   def runStep(stepHash)
     logger.debug("Running step: #{stepHash}")
@@ -119,55 +211,5 @@ class Game
 
   def runStepWinner(stepHash)
     logger.warn("UNIMPLEMENTED ACTION TYPE")
-  end
-
-  # @param websocket The websocket connection to the player
-  def addPlayer(websocket, playerDir = nil)
-    if(playerDir != nil)
-      logger.debug("Adding new player with requested direction: #{playerDir}")
-    end
-
-    finalPlayerDir = nil
-    if(playerDir != nil && @players.any?{ |player| player == playerDir })
-      @players[playerDir] = websocket
-      finalPlayerDir = playerDir
-    elsif(playerDir == nil)
-      @players.each do |key,value|
-        if(value == nil)
-          @players[key] = websocket
-          finalPlayerDir = key
-          break
-        end
-      end
-
-      if(finalPlayerDir == nil)
-        logger.error("New client tried to join, but there's no room!")
-      end
-    else
-      logger.error("New client connection provided invalid player direction")
-    end
-    logger.info("New client set to player position: #{finalPlayerDir}")
-
-    if(finalPlayerDir != nil)
-      @playerCount += 1
-      msg = {"type": "set_player_location", "location": finalPlayerDir}
-      sendMessage(MessageBuilder.buildActionMessage(msg), [finalPlayerDir])
-
-      if(@playerCount == @players.keys.size)
-        runGame()
-      end
-    end
-  end
-
-  def receivedMessage(msg)
-
-  end
-
-  def sendMessage(msg, receivingPlayers)
-    logger.info("Sending #{msg["type"]} message to #{receivingPlayers}")
-    receivingPlayers.each do |player|
-      logger.debug("Sending message to #{player}: #{msg}")
-      @players[player].send(msg)
-    end
   end
 end
