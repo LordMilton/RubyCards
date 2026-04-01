@@ -38,11 +38,6 @@ class GameWindow < Gosu::Window
   private :drawFps
 
   def update
-    @frameInSecond = (@frameInSecond + 1) % 60
-    if(@frameInSecond == 0)
-      @gm.setFrontPlayer(@playerOrder[@playerOrderNum % @playerOrder.size])
-      @playerOrderNum = (@playerOrderNum + 1) % @playerOrder.size
-    end
   end
 
   def close
