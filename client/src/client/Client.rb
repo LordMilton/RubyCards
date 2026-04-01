@@ -1,11 +1,12 @@
 require "gosu"
+require "json"
 require "logger"
 require "websocket-eventmachine-client"
 require_relative "../cards/CardDrawer"
 require_relative "../game/GameMaster"
+require_relative "../Logger"
 
-logger = Logger.new(STDOUT)
-logger.level = Logger::DEBUG
+include MyLogger
 
 gameWindow = nil
 gameMaster = nil
@@ -21,26 +22,40 @@ EM.run do
     gameWindow = GameWindow.new(gameMaster).show()
   end
 
-  ws.onmessage do |msg, type|
+  ws.onmessage do |msgJson, type|
+    msg = JSON.parse(msgJson)
     logger.debug("Received message: #{msg}")
     case msg["type"]
-    when "nil"
-      logger.warn("Received message with no type")
     when "action"
-      logger.warn("Received message unhandled type #{msg["type"]}")
+      msg = msg["msg"]
+      case msg["type"]
+      when "set_player_location"
+        gameMaster.setFrontPlayer(msg["location"])
+      else
+        logger.warn("Received action message with unknown type #{msg["type"]}")
+      end
     when "actionable"
-      logger.warn("Received message unhandled type #{msg["type"]}")
+      msg = msg["msg"]
+      case msg["type"]
+      when "play"
+        logger.warn("Received actionable message with unhandled type #{msg["type"]}")
+      when "draw"
+        logger.warn("Received actionable message with unhandled type #{msg["type"]}")
+      when "discard"
+        logger.warn("Received actionable message with unhandled type #{msg["type"]}")
+      else
+        logger.warn("Received actionable message with unknown type #{msg["type"]}")
+      end
     when "info"
       logger.warn("Received message unhandled type #{msg["type"]}")
+    else
+      logger.warn("Received message with an unknown type #{msg["type"]}")
     end
   end
 
   ws.onclose do |code, reason|
     logger.debug("Disconnected with status code: #{code}")
-  end
-
-  EventMachine.next_tick do
-    ws.send "Hello Server!"
+    exit
   end
 
 end
