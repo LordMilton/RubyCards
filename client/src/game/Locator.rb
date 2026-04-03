@@ -146,17 +146,18 @@ class Locator
   def getPlayerNameDrawers(dirNamesHash)
     fontHeight = @actualDesiredPlayerNameHeight.to_i
     #scale = @DesiredPlayerNameHeight / Gosu::Font.new.height
+    nameFont = Gosu::Font.new(fontHeight)
     textDrawers = {}
     textDrawersArray = [
-      proc { |name| Gosu::Font.new(fontHeight).draw_text_rel(name, @bottomNameXCenter, @bottomNameYCenter, 1, 0.5, 0.5) },
-      proc { |name| Gosu::Font.new(fontHeight).draw_text_rel(name, @leftNameXCenter, @leftNameYCenter, 1, 0.5, 0.5) },
-      proc { |name| Gosu::Font.new(fontHeight).draw_text_rel(name, @topNameXCenter, @topNameYCenter, 1, 0.5, 0.5) },
-      proc { |name| Gosu::Font.new(fontHeight).draw_text_rel(name, @rightNameXCenter, @rightNameYCenter, 1, 0.5, 0.5) }
+      proc { |name| nameFont.draw_text_rel(name, @bottomNameXCenter, @bottomNameYCenter, 1, 0.5, 0.5) },
+      proc { |name| nameFont.draw_text_rel(name, @leftNameXCenter, @leftNameYCenter, 1, 0.5, 0.5) },
+      proc { |name| nameFont.draw_text_rel(name, @topNameXCenter, @topNameYCenter, 1, 0.5, 0.5) },
+      proc { |name| nameFont.draw_text_rel(name, @rightNameXCenter, @rightNameYCenter, 1, 0.5, 0.5) }
     ]
     dirNamesHash.zip(textDrawersArray).each do |dirName, textDrawer|
       key = dirName[0]
       name = dirName[1]
-      textDrawers[key] = textDrawer
+      textDrawers[key] = proc { textDrawer.call(name) }
     end
     return textDrawers
   end

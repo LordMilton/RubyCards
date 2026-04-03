@@ -40,7 +40,7 @@ class Game
 
     while !gameComplete do
       if(@curStep <= @finalInstructionStep)
-        runStep(@gameInstructions["#{@@StepPrefix}#{step}"])
+        runStep(@gameInstructions["#{@@StepPrefix}#{@curStep}"])
       else
         gameComplete = true
       end
@@ -96,8 +96,6 @@ class Game
 
     if(finalPlayerDir != nil)
       @playerCount += 1
-      msg = {"type": "set_player_location", "location": finalPlayerDir}
-      addOutgoingMessage(MessageBuilder.buildActionMessage(msg), [finalPlayerDir])
       defineWebsocketResponses(websocket, finalPlayerDir)
 
       if(!@gameStarted && @playerCount == @players.keys.size)
@@ -116,24 +114,6 @@ class Game
     end
   end
 
-  def receivedMessage(msg, player)
-    case msg["action"]
-    when "draw"
-      logger.warning("Received message with unhandled action type #{msg["action"]}")
-    when "play"
-      logger.warning("Received message with unhandled action type #{msg["action"]}")
-    when "discard"
-      logger.warning("Received message with unhandled action type #{msg["action"]}")
-    end
-  end
-
-  def sendMessage(msg, receivingPlayers)
-    logger.info("Sending message to #{receivingPlayers}")
-    receivingPlayers.each do |player|
-      logger.debug("Sending message to #{player}: #{msg}")
-      @players[player].send(msg)
-    end
-  end
 
   private
 
@@ -162,7 +142,80 @@ class Game
     ws.onclose do
       @players[playerDir] = nil
       @playerCount -= 1
+      indicatePlayerDisconnected(playerDir)
       logger.info("Player in seat #{playerDir} disconnected")
+    end
+  end
+  
+  def receivedMessage(msgJson, player)
+    msg = JSON.parse(msgJson)
+    case msg["action"]
+    when "request_place"
+      logger.debug("Received #{msg["action"]} message from player #{player}")
+      handleRequestPlaceMsg(msg, player)
+    when "draw"
+      logger.warning("Received message with unhandled action type #{msg["action"]}")
+    when "play"
+      logger.warning("Received message with unhandled action type #{msg["action"]}")
+    when "discard"
+      logger.warning("Received message with unhandled action type #{msg["action"]}")
+    end
+  end
+
+  def handleRequestPlaceMsg(msg, player)
+    finalPlayerDir = player
+    if(msg["place"] != nil)
+      requestedPlace = msg["place"]
+      if(@players.any?{ |player| player == requestedPlace } && @players["place"] == nil)
+        finalPlayerDir = requestedPlace
+        messagingPlayerWs = @players[player]
+        @players[finalPlayerDir] = messagingPlayerWs
+        @players[player] = nil
+        # Have to fix the responses, else we'll think they're still in their old seat when they send us messages
+        defineWebsocketResponses(messagingPlayerWs, finalPlayerDir)
+        logger.info("Player in slot #{player} was reassigned to slot #{finalPlayerDir}")
+      end
+    end
+    outgoingMsg = {"type": "set_player_location", "location": finalPlayerDir}
+    addOutgoingMessage(MessageBuilder.buildActionMessage(outgoingMsg), [finalPlayerDir])
+    indicatePlayerConnected(finalPlayerDir)
+    informState(finalPlayerDir)
+  end
+  private :handleRequestPlaceMsg
+
+  def indicatePlayerConnected(connectedPlayerDir, playersToMsg = getConnectedPlayers())
+    outgoingMsg = {"type": "player_connected", "location": connectedPlayerDir}
+    addOutgoingMessage(MessageBuilder.buildActionMessage(outgoingMsg), playersToMsg)
+  end
+
+  def indicatePlayerDisconnected(disconnectedPlayerDir)
+    outgoingMsg = {"type": "player_disconnected", "location": disconnectedPlayerDir}
+    addOutgoingMessage(MessageBuilder.buildActionMessage(outgoingMsg), getConnectedPlayers())
+  end
+
+  def informState(playerDir)
+    logger.info("Reupping state for player in slot #{playerDir}")
+
+    connectedPlayers = getConnectedPlayers()
+    logger.debug("Reupping connected players state: #{connectedPlayers}")
+    connectedPlayers.each do |dir|
+      indicatePlayerConnected(dir, [playerDir])
+    end
+    if(@gameStarted)
+      #TODO Indicate game state
+    end
+  end
+
+  def getConnectedPlayers()
+    conPlayers = @players.select { |key, value| value != nil }
+    return conPlayers.keys
+  end
+
+  def sendMessage(msg, receivingPlayers)
+    logger.info("Sending message to #{receivingPlayers}")
+    receivingPlayers.each do |player|
+      logger.debug("Sending message to #{player}: #{msg}")
+      @players[player].send(msg)
     end
   end
 

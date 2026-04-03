@@ -18,8 +18,15 @@ EM.run do
   ws.onopen do
     logger.debug("Connected")
     cardDrawer = CardDrawer.new("../../resources/cards/")
-    gameMaster = GameMaster.new(cardDrawer)
-    gameWindow = GameWindow.new(gameMaster).show()
+    gameMaster = GameMaster.new(ws, cardDrawer)
+    gosuThread = Thread.new {
+      gameWindow = GameWindow.new(gameMaster)
+      logger.info("Starting game window")
+      gameWindow.show()
+    }
+    
+    msgHash = { "action": "request_place" }
+    ws.send(JSON.generate(msgHash))
   end
 
   ws.onmessage do |msgJson, type|
@@ -31,6 +38,10 @@ EM.run do
       case msg["type"]
       when "set_player_location"
         gameMaster.setFrontPlayer(msg["location"])
+      when "player_connected"
+        gameMaster.playerConnected(msg["location"])
+      when "player_disconnected"
+        gameMaster.playerDisconnected(msg["location"])
       else
         logger.warn("Received action message with unknown type #{msg["type"]}")
       end

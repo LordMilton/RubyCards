@@ -18,6 +18,7 @@ class GameWindow < Gosu::Window
     @timeNow = Time.new
     @timeLast = Time.new
     @frameInSecond = 0
+    @showFps = true
     @playerOrder = [:S, :N, :E, :W]
     @playerOrderNum = 0
   end

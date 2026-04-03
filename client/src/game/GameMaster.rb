@@ -6,21 +6,22 @@ require_relative "./Locator"
 require_relative "./Window"
 
 LOCATION = {
-  S: 0,
-  W: 1,
-  N: 2,
-  E: 3
+  "S" => 0,
+  "W" => 1,
+  "N" => 2,
+  "E" => 3
 }
 
 DEFAULT_NAMES = {
-  S: "South",
-  W: "West",
-  N: "North",
-  E: "East"
+  "S" => "South",
+  "W" => "West",
+  "N" => "North",
+  "E" => "East"
 }
 
 def numToDirectionHash(num)
   dirs = LOCATION.keys
+  logger.debug("Location keys: #{dirs}")
   return dirs[num % dirs.size]
 end
 
@@ -34,7 +35,8 @@ class GameMaster
   @@ButtonWidth = 150
   @@ButtonHeightBuffer = 10
 
-  def initialize(cardDrawer)
+  def initialize(websocket, cardDrawer)
+    @websocket = websocket
     @cardDrawer = cardDrawer
     @playerPositionsClockwiseFromFront = [numToDirectionHash(0), numToDirectionHash(1), numToDirectionHash(2), numToDirectionHash(3)]
     # Assumes a 1920,1080 screen, can adjust from there by ratio of new screen sizes
@@ -46,6 +48,7 @@ class GameMaster
     @discardLocation = @locator.getDiscardLocation
     @frontPlayer = numToDirectionHash(0)
     @playerHands = {}
+    @connectedPlayers = []
     @playerNamesDrawers = {}
 
     @buttonLabels = ["Draw", "Play", "Discard"]
@@ -112,6 +115,7 @@ class GameMaster
   end
 
   def setFrontPlayer(hashDir)
+    logger.debug("Setting position #{hashDir} to be the front player")
     if(playerSlotExists?(hashDir))
       difference = (LOCATION[hashDir] - LOCATION[@frontPlayer])
       @playerPositionsClockwiseFromFront.map! { |pos| numToDirectionHash(LOCATION[pos] + difference) }
@@ -124,14 +128,19 @@ class GameMaster
   end
 
   def repositionHands
-    dirNamesHash = {}
     @playerHandLocations.each do |handKey, location|
-      dirNamesHash[handKey] = DEFAULT_NAMES[handKey]
       hand = @playerHands[handKey]
       if(hand != nil)
         hand.setHandLocation(location)
       end
     end
+    dirNamesHash = {}
+    logger.debug("list of connected player slots: #{@connectedPlayers}")
+    @playerPositionsClockwiseFromFront.each do |dir|
+      logger.debug("#{dir}")
+      dirNamesHash[dir] = (@connectedPlayers.include?(dir)) ? DEFAULT_NAMES[dir] : ""
+    end
+    puts("Moving/assigning player names drawers: #{dirNamesHash}")
     @playerNamesDrawers = @locator.getPlayerNameDrawers(dirNamesHash)
   end
   private :repositionHands
@@ -141,12 +150,23 @@ class GameMaster
   end
   private :playerSlotExists?
 
+  def playerConnected(playerDir)
+    logger.debug("Including player slot #{playerDir} in game")
+    @connectedPlayers.append(playerDir)
+    repositionHands()
+  end
+
+  def playerDisconnected(playerDir)
+    @connectedPlayers.delete(playerDir)
+    repositionHands()
+  end
+
   def drawGame(mouseX, mouseY)
     @playerHands.each_value do |hand|
       hand.draw
     end
     @playerNamesDrawers.each do |dirKey, drawFun|
-      drawFun.call(DEFAULT_NAMES[dirKey])
+      drawFun.call()
     end
     if(@deck != nil)
       @deck.draw
