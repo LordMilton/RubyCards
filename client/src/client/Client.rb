@@ -10,58 +10,110 @@ include MyLogger
 
 gameWindow = nil
 gameMaster = nil
+cardDrawer = nil
+
+websocketMtx = Mutex.new
 
 EM.run do
 
   ws = WebSocket::EventMachine::Client.connect(:uri => 'ws://localhost:25252')
 
   ws.onopen do
-    logger.debug("Connected")
-    cardDrawer = CardDrawer.new("../../resources/cards/")
-    gameMaster = GameMaster.new(ws, cardDrawer)
-    gosuThread = Thread.new {
-      gameWindow = GameWindow.new(gameMaster)
-      logger.info("Starting game window")
-      gameWindow.show()
+    websocketMtx.synchronize {
+      logger.debug("Connected")
+      cardDrawer = CardDrawer.new("../../resources/cards/")
+      gameMaster = GameMaster.new(ws, cardDrawer)
+      gosuThread = Thread.new {
+        gameWindow = GameWindow.new(gameMaster)
+        logger.info("Starting game window")
+        gameWindow.show()
+      }
+      
+      msgHash = { "action": "request_place" }
+      ws.send(JSON.generate(msgHash))
     }
-    
-    msgHash = { "action": "request_place" }
-    ws.send(JSON.generate(msgHash))
   end
 
   ws.onmessage do |msgJson, type|
-    msg = JSON.parse(msgJson)
-    logger.debug("Received message: #{msg}")
-    case msg["type"]
-    when "action"
-      msg = msg["msg"]
+    websocketMtx.synchronize {
+      msg = JSON.parse(msgJson)
+      logger.debug("Received message: #{msg}")
       case msg["type"]
-      when "set_player_location"
-        gameMaster.setFrontPlayer(msg["location"])
-      when "player_connected"
-        gameMaster.playerConnected(msg["location"])
-      when "player_disconnected"
-        gameMaster.playerDisconnected(msg["location"])
+      when "action"
+        msg = msg["msg"]
+        case msg["type"]
+        when "set_player_location"
+          gameMaster.setFrontPlayer(msg["location"])
+        when "player_connected"
+          gameMaster.playerConnected(msg["location"])
+        when "player_disconnected"
+          gameMaster.playerDisconnected(msg["location"])
+        when "add_card"
+          card = msg["card"]
+          suit = card["suit"]
+          value = card["value"]
+          newCard = Card.new(suit, value, cardDrawer)
+
+          subject = nil
+          case msg["subject"]
+          when "deck"
+            gameMaster.addToDeck(newCard)
+          when "discard"
+            gameMaster.addToDiscard(newCard)
+          when "hand"
+            gameMaster.addToHand(msg["subjectSpecifier"], newCard)
+          else
+            logger.warn("Received add_card message with unknown subject #{msg["subject"]}")
+          end
+        when "remove_card"
+          index = msg["index"]
+
+          subject = nil
+          case msg["subject"]
+          when "deck"
+            gameMaster.removeFromDeck(index)
+          when "discard"
+            gameMaster.removeFromDiscard(index)
+          when "hand"
+            gameMaster.removeFromHand(msg["subjectSpecifier"], index)
+          else
+            logger.warn("Received remove_card message with unknown subject #{msg["subject"]}")
+          end
+        else
+          logger.warn("Received action message with unknown type #{msg["type"]}")
+        end
+      when "actionable"
+        msg = msg["msg"]
+        case msg["type"]
+        when "play"
+          logger.warn("Received actionable message with unhandled type #{msg["type"]}")
+        when "draw"
+          logger.warn("Received actionable message with unhandled type #{msg["type"]}")
+        when "discard"
+          logger.warn("Received actionable message with unhandled type #{msg["type"]}")
+        else
+          logger.warn("Received actionable message with unknown type #{msg["type"]}")
+        end
+      when "info"
+        msg = msg["msg"]
+        case msg["type"]
+        when "set_visibility"
+          visible = msg["visible"] == "true" ? true : false
+          case msg["subject"]
+          when "deck"
+            gameMaster.makeDeckVisible(visible)
+          when "discard"
+            gameMaster.makeDiscardVisible(visible)
+          else
+            logger.warn("Received set_visibility message with unknown subject #{msg["subject"]}")
+          end
+        else
+          logger.warn("Received info message with unknown type #{msg["type"]}")
+        end
       else
-        logger.warn("Received action message with unknown type #{msg["type"]}")
+        logger.warn("Received message with an unknown type #{msg["type"]}")
       end
-    when "actionable"
-      msg = msg["msg"]
-      case msg["type"]
-      when "play"
-        logger.warn("Received actionable message with unhandled type #{msg["type"]}")
-      when "draw"
-        logger.warn("Received actionable message with unhandled type #{msg["type"]}")
-      when "discard"
-        logger.warn("Received actionable message with unhandled type #{msg["type"]}")
-      else
-        logger.warn("Received actionable message with unknown type #{msg["type"]}")
-      end
-    when "info"
-      logger.warn("Received message unhandled type #{msg["type"]}")
-    else
-      logger.warn("Received message with an unknown type #{msg["type"]}")
-    end
+    }
   end
 
   ws.onclose do |code, reason|

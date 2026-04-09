@@ -21,7 +21,6 @@ DEFAULT_NAMES = {
 
 def numToDirectionHash(num)
   dirs = LOCATION.keys
-  logger.debug("Location keys: #{dirs}")
   return dirs[num % dirs.size]
 end
 
@@ -45,7 +44,11 @@ class GameMaster
 
     @playerHandLocations = @locator.getPlayerHandLocations(@playerPositionsClockwiseFromFront)
     @deckLocation = @locator.getDeckLocation
+    createDeck(0)
+    @deckVisible = true
     @discardLocation = @locator.getDiscardLocation
+    createDiscard()
+    @discardVisible = true
     @frontPlayer = numToDirectionHash(0)
     @playerHands = {}
     @connectedPlayers = []
@@ -68,12 +71,24 @@ class GameMaster
     @deck.setHandLocation(@deckLocation)
   end
 
+  def addToDeck(card)
+    @deck.add(card)
+  end
+
+  def removeFromDeck(index)
+    return @deck.remove(0)
+  end
+
   def drawFromDeck(numToDraw = 1)
     return @deck.remove(0)
   end
 
   def makeDeckSelectable(selectable)
     @deck.makeSelectable(selectable)
+  end
+
+  def makeDeckVisible(visible)
+    @deckVisibility = visible
   end
 
   def createDiscard(cards = Hand.new)
@@ -85,13 +100,21 @@ class GameMaster
     @discard.add(cards)
   end
 
+  def removeFromDiscard(index)
+    @discard.remove(index)
+  end
+
   def makeDiscardSelectable(selectable)
     @discard.makeSelectable(selectable)
   end
 
+  def makeDiscardVisible(visible)
+    @discardVisibility = visible
+  end
+
   def createPlayerHand(hashDir, hand = Hand.new)
     if(playerSlotExists?(hashDir))
-      @playerHands[hashDir] = hand
+      @playerHands[hashDir] ||= hand
       repositionHands()
       return true
     end
@@ -135,9 +158,8 @@ class GameMaster
       end
     end
     dirNamesHash = {}
-    logger.debug("list of connected player slots: #{@connectedPlayers}")
+    logger.debug("Connected player slots: #{@connectedPlayers}")
     @playerPositionsClockwiseFromFront.each do |dir|
-      logger.debug("#{dir}")
       dirNamesHash[dir] = (@connectedPlayers.include?(dir)) ? DEFAULT_NAMES[dir] : ""
     end
     puts("Moving/assigning player names drawers: #{dirNamesHash}")
@@ -152,7 +174,12 @@ class GameMaster
 
   def playerConnected(playerDir)
     logger.debug("Including player slot #{playerDir} in game")
-    @connectedPlayers.append(playerDir)
+    if(!@connectedPlayers.include?(playerDir))
+      @connectedPlayers.append(playerDir)
+      createPlayerHand(playerDir)
+    else
+      logger.debug("Ignoring duplicate player connected")
+    end
     repositionHands()
   end
 
@@ -168,10 +195,10 @@ class GameMaster
     @playerNamesDrawers.each do |dirKey, drawFun|
       drawFun.call()
     end
-    if(@deck != nil)
+    if(@deck != nil && @deckVisible)
       @deck.draw
     end
-    if(@discard != nil)
+    if(@discard != nil && @discardVisible)
       @discard.draw
     end
     @buttons.each_value do |btn|
@@ -182,6 +209,12 @@ class GameMaster
   def clicked(mouseX, mouseY)
     @playerHands.values.each do |hand|
       hand.clicked(mouseX, mouseY)
+    end
+    if(@deckVisible)
+      @deck.clicked(mouseX, mouseY)
+    end
+    if(@discardVisible)
+      @discard.clicked(mouseX, mouseY)
     end
   end
 

@@ -53,9 +53,7 @@ class Card
   end
 
   def getImage
-    if(@image == nil)
-      @image = @cardDrawer.getCardImage(self)
-    end
+    @image ||= @cardDrawer.getCardImage(self)
     return(@image)
   end
 

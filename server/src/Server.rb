@@ -17,6 +17,7 @@ class Server
           @game.addPlayer(ws)
 
           startTickThread(30)
+          startGameThread()
         end
 
       end
@@ -24,14 +25,23 @@ class Server
   end
 
   def startTickThread(ticksPerSecond)
-    if(@tickThread == nil)
-      @tickThread = Thread.new {
-        while(true)
-          @game.tick()
-          sleep(1.0 / ticksPerSecond)
-        end
-      }
-    end
+    @tickThread ||= Thread.new {
+      while(true)
+        @game.tick()
+        sleep(1.0 / ticksPerSecond)
+      end
+    }
+  end
+
+  def startGameThread()
+    @gameThread ||= Thread.new {
+      gameRan = false
+      while(!gameRan)
+        sleep(10)
+        @game.runGame()
+        gameRan = @game.gameStarted
+      end
+    }
   end
 end
 

@@ -2,10 +2,38 @@
   "game": {
     "name": "Sample Hearts",
     "deck": {
-      "cards": [
-        "spades_2",
-        "hearts_2"
-      ],
+      "cards": {
+        "trump": [
+          "hearts_ace",
+          "hearts_king",
+          "hearts_queen",
+          "hearts_jack",
+          "hearts_10",
+          "hearts_9",
+          "hearts_8",
+          "hearts_7",
+          "hearts_6",
+          "hearts_5",
+          "hearts_4",
+          "hearts_3",
+          "hearts_2"
+        ],
+        "fail": [
+          ["spades_ace", "clubs_ace", "diamonds_ace"],
+          ["spades_king", "clubs_king", "diamonds_king"],
+          ["spades_queen", "clubs_queen", "diamonds_queen"],
+          ["spades_jack", "clubs_jack", "diamonds_jack"],
+          ["spades_10", "clubs_10", "diamonds_10"],
+          ["spades_9", "clubs_9", "diamonds_9"],
+          ["spades_8", "clubs_8", "diamonds_8"],
+          ["spades_7", "clubs_7", "diamonds_7"],
+          ["spades_6", "clubs_6", "diamonds_6"],
+          ["spades_5", "clubs_5", "diamonds_5"],
+          ["spades_4", "clubs_4", "diamonds_4"],
+          ["spades_3", "clubs_3", "diamonds_3"],
+          ["spades_2", "clubs_2", "diamonds_2"]
+        ]
+      },
       "visible": false
     },
     "discard": {
@@ -24,7 +52,7 @@
       "action": "reset_hand"
     },
     "change_2": {
-      "action": "reset_deck"
+      "action": "shuffle_deck"
     },
     "change_3": {
       "action": "draw"
@@ -42,7 +70,10 @@
   "step_3": {
     "action": "repeat_until",
     "from_step": 1,
-    "change": "next_player",
+    "change": {
+      "subject": "player",
+      "change": "next"
+    },
     "condition": {
       "type": "occurrences",
       "comparison": 4
@@ -55,6 +86,10 @@
   "step_5": {
     "action": "repeat_until",
     "from_step": 1,
+    "change": {
+      "subject": "player",
+      "change": "last_winner"
+    },
     "condition": {
       "type": "hand_size",
       "comparison": 0
