@@ -43,6 +43,7 @@ class GameMaster
     @locator = Locator.new(@@BaseScreenSize)
 
     @playerHandLocations = @locator.getPlayerHandLocations(@playerPositionsClockwiseFromFront)
+    @playAreaLocations = @locator.getPlayAreaLocations(@playerPositionsClockwiseFromFront)
     @deckLocation = @locator.getDeckLocation
     createDeck(0)
     @deckVisible = true
@@ -51,13 +52,16 @@ class GameMaster
     @discardVisible = true
     @frontPlayer = numToDirectionHash(0)
     @playerHands = {}
+    @playAreas = {}
     @connectedPlayers = []
     @playerNamesDrawers = {}
+
+    @curActionables = {}
 
     @buttonLabels = ["Draw", "Play", "Discard"]
     @buttons = @locator.getButtonLocations(@buttonLabels)
     @buttons.each do |name, location|
-      @buttons[name] = Button.new(name, location)
+      @buttons[name] = Button.new(name.capitalize(), location)
     end
   end
 
@@ -88,7 +92,7 @@ class GameMaster
   end
 
   def makeDeckVisible(visible)
-    @deckVisibility = visible
+    @deckVisible = visible
   end
 
   def createDiscard(cards = Hand.new)
@@ -109,7 +113,7 @@ class GameMaster
   end
 
   def makeDiscardVisible(visible)
-    @discardVisibility = visible
+    @discardVisible = visible
   end
 
   def createPlayerHand(hashDir, hand = Hand.new)
@@ -120,6 +124,7 @@ class GameMaster
     end
     return false
   end
+  private :createPlayerHand
 
   def addToHand(hashDir, card)
     if(playerSlotExists?(hashDir))
@@ -131,10 +136,56 @@ class GameMaster
 
   def removeFromHand(hashDir, index)
     if(playerSlotExists?(hashDir))
-      @playerHands[hashDir].add(card)
+      return @playerHands[hashDir].remove(index)
+    end
+    return nil
+  end
+
+  def createPlayArea(hashDir, hand = Hand.new)
+    if(playerSlotExists?(hashDir))
+      @playAreas[hashDir] ||= hand
+      repositionHands()
       return true
     end
     return false
+  end
+  private :createPlayArea
+
+  def addToPlayArea(hashDir, card)
+    if(playerSlotExists?(hashDir))
+      @playAreas[hashDir].add(card)
+      return true
+    end
+    return false
+  end
+
+  def removeFromPlayArea(hashDir, index)
+    if(playerSlotExists?(hashDir))
+      return @playAreas[hashDir].remove(index)
+    end
+    return nil
+  end
+
+  def addActionable(actionable, count)
+    logger.debug("Adding potential actionable: #{actionable}")
+    @curActionables[actionable] = count
+    if(actionable == "play" || actionable == "discard")
+      getFrontPlayerHand().makeSelectable(true)
+    elsif(actionable == "draw")
+      makeDeckSelectable(true)
+    end
+  end
+
+  def resetActionables()
+    @curActionables = {}
+    @playerHands.each_value do |hand|
+      hand.makeSelectable(false)
+    end
+    @buttons.each_value do |button|
+      button.makeSelectable(false)
+    end
+    makeDeckSelectable(false)
+    makeDiscardSelectable(false)
   end
 
   def setFrontPlayer(hashDir)
@@ -143,11 +194,16 @@ class GameMaster
       difference = (LOCATION[hashDir] - LOCATION[@frontPlayer])
       @playerPositionsClockwiseFromFront.map! { |pos| numToDirectionHash(LOCATION[pos] + difference) }
       @playerHandLocations = @locator.getPlayerHandLocations(@playerPositionsClockwiseFromFront)
+      @playAreaLocations = @locator.getPlayAreaLocations(@playerPositionsClockwiseFromFront)
       @frontPlayer = hashDir
       repositionHands()
       return true
     end
     return false
+  end
+
+  def getFrontPlayerHand()
+    return @playerHands[@frontPlayer]
   end
 
   def repositionHands
@@ -157,12 +213,17 @@ class GameMaster
         hand.setHandLocation(location)
       end
     end
+    @playAreaLocations.each do |handKey, location|
+      playArea = @playAreas[handKey]
+      if(playArea != nil)
+        playArea.setHandLocation(location)
+      end
+    end
     dirNamesHash = {}
     logger.debug("Connected player slots: #{@connectedPlayers}")
     @playerPositionsClockwiseFromFront.each do |dir|
       dirNamesHash[dir] = (@connectedPlayers.include?(dir)) ? DEFAULT_NAMES[dir] : ""
     end
-    puts("Moving/assigning player names drawers: #{dirNamesHash}")
     @playerNamesDrawers = @locator.getPlayerNameDrawers(dirNamesHash)
   end
   private :repositionHands
@@ -177,6 +238,7 @@ class GameMaster
     if(!@connectedPlayers.include?(playerDir))
       @connectedPlayers.append(playerDir)
       createPlayerHand(playerDir)
+      createPlayArea(playerDir)
     else
       logger.debug("Ignoring duplicate player connected")
     end
@@ -190,16 +252,19 @@ class GameMaster
 
   def drawGame(mouseX, mouseY)
     @playerHands.each_value do |hand|
-      hand.draw
+      hand.draw(mouseX, mouseY)
     end
     @playerNamesDrawers.each do |dirKey, drawFun|
       drawFun.call()
     end
+    @playAreas.each_value do |playArea|
+      playArea.draw(mouseX, mouseY)
+    end
     if(@deck != nil && @deckVisible)
-      @deck.draw
+      @deck.draw(mouseX, mouseY)
     end
     if(@discard != nil && @discardVisible)
-      @discard.draw
+      @discard.draw(mouseX, mouseY)
     end
     @buttons.each_value do |btn|
       btn.draw(mouseX, mouseY)
@@ -207,45 +272,93 @@ class GameMaster
   end
 
   def clicked(mouseX, mouseY)
+    cardClicked = false
     @playerHands.values.each do |hand|
-      hand.clicked(mouseX, mouseY)
+      cardClicked = cardClicked || hand.clicked(mouseX, mouseY)
+    end
+    @playAreas.values.each do |hand|
+      cardClicked = cardClicked || hand.clicked(mouseX, mouseY)
     end
     if(@deckVisible)
-      @deck.clicked(mouseX, mouseY)
+      cardClicked = cardClicked || @deck.clicked(mouseX, mouseY)
     end
     if(@discardVisible)
-      @discard.clicked(mouseX, mouseY)
+      cardClicked = cardClicked || @discard.clicked(mouseX, mouseY)
     end
+    @buttons.each do |actionable, button|
+      buttonClicked = button.clicked?(mouseX, mouseY)
+      if(buttonClicked)
+        msg = { "action" => actionable }
+        if(actionable == "draw")
+          msg["subject"] = "deck"
+        else
+          msg["subject"] = "hand"
+          msg["index"] = getFrontPlayerHand().getSelectedIndexes()
+        end
+        sendMessage(msg)
+        resetActionables()
+      end
+    end
+
+    if(cardClicked)
+      enableDisableButtons()
+    end
+  end
+
+  def enableDisableButtons()
+    # Should assume buttons can't be used unless there's an associated actionable active
+    @buttons.each_value do |button|
+      button.makeSelectable(false)
+    end
+
+    @curActionables.each do |action, count|
+      handToCheck = ((action == "draw") ? @deck : getFrontPlayerHand())
+      selectedInHandToCheck = handToCheck.getSelected()
+      if(selectedInHandToCheck.size() == count)
+        @buttons[action].makeSelectable(true)
+      end
+    end
+  end
+
+  def sendMessage(msgHash)
+    @websocket.send(JSON.generate(msgHash))
   end
 
 end
 
 if __FILE__ == $0
   sampleCardDrawer = CardDrawer.new("../../resources/cards")
-  gm = GameMaster.new(sampleCardDrawer)
-  sampleHands = {S: nil}
+  gm = GameMaster.new(nil, sampleCardDrawer)
+  players = ["S", "E", "N", "W"]
   handNum = 2
-  sampleHands.each do |handKey, hand|
-    numCards = 10
-    newHand = Hand.new()
-    newHand.makeSelectable(true)
+  players.each do |handKey|
+    gm.playerConnected(handKey)
+    numCards = 5
     while numCards > 0 do
-      newHand.add(Card.new("spades", handNum, sampleCardDrawer))
+      handCard = Card.new("spades", handNum, sampleCardDrawer)
+      playedCard = Card.new("diamonds", handNum, sampleCardDrawer)
+      gm.addToHand(handKey, handCard)
+      gm.addToPlayArea(handKey, playedCard)
       numCards -= 1
     end
-    sampleHands[handKey] = newHand
-    gm.createPlayerHand(handKey, newHand)
+
     handNum += 1
   end
+  # make stuff selectable
+  gm.addActionable("play", 1)
+  gm.addActionable("draw", 1)
 
   gm.createDeck(52)
   discard = Hand.new
   discardSize = 6
   while discardSize > 0 do
-    discard.add(Card.new("hearts", 8, sampleCardDrawer))
+    discard.add(Card.new("hearts", "king", sampleCardDrawer))
     discardSize -= 1
   end
   gm.createDiscard(discard)
+
+  gm.makeDiscardVisible(false)
+  gm.makeDeckVisible(false)
 
   window = GameWindow.new(gm).show()
 end

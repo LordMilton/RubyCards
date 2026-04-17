@@ -52,7 +52,7 @@ class Card
     end
   end
 
-  def getImage
+  def getImage()
     @image ||= @cardDrawer.getCardImage(self)
     return(@image)
   end
@@ -64,8 +64,8 @@ class Card
     @bottomRightY = topLeftY + height
   end
 
-  def draw
-    cardImage = getImage
+  def draw(mouseX, mouseY)
+    cardImage = getImage()
     if(@selected)
       drawRectangle(@cardDrawer.getHighlightImage, @topLeftX - @@HighlightSizePx, @topLeftY - @@HighlightSizePx, @bottomRightX + @@HighlightSizePx, @bottomRightY + @@HighlightSizePx)
     end
@@ -83,4 +83,12 @@ class Card
     )
   end
   private :drawRectangle
+
+  def getHoverTextDrawer(mouseX, mouseY)
+    @hoverText ||= @cardDrawer.getCardHoverText(self, 22)
+    if(pointWithinBounds(mouseX, mouseY))
+      return proc { @hoverText.draw(mouseX, mouseY + 15, 1) }
+    end
+    return nil
+  end
 end

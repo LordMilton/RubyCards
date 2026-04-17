@@ -21,6 +21,14 @@ class CardDrawer
     return(Gosu::Image.new(cardFile))
   end
 
+  def getCardHoverText(card, textHeight)
+    name = ""
+    if(!card.hidden?)
+      name = "#{card.value} of #{card.suit}"
+    end
+    return(Gosu::Image.from_text(name, textHeight))
+  end
+
   def getHighlightImage
     cardFile = @cardImagesDir.dup
     if(@highlightImage == nil)

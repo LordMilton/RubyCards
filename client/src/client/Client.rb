@@ -62,6 +62,8 @@ EM.run do
             gameMaster.addToDiscard(newCard)
           when "hand"
             gameMaster.addToHand(msg["subjectSpecifier"], newCard)
+          when "play_area"
+            gameMaster.addToPlayArea(msg["subjectSpecifier"], newCard)
           else
             logger.warn("Received add_card message with unknown subject #{msg["subject"]}")
           end
@@ -76,6 +78,8 @@ EM.run do
             gameMaster.removeFromDiscard(index)
           when "hand"
             gameMaster.removeFromHand(msg["subjectSpecifier"], index)
+          when "play_area"
+            gameMaster.removeFromPlayArea(msg["subjectSpecifier"], index)
           else
             logger.warn("Received remove_card message with unknown subject #{msg["subject"]}")
           end
@@ -83,16 +87,20 @@ EM.run do
           logger.warn("Received action message with unknown type #{msg["type"]}")
         end
       when "actionable"
-        msg = msg["msg"]
-        case msg["type"]
-        when "play"
-          logger.warn("Received actionable message with unhandled type #{msg["type"]}")
-        when "draw"
-          logger.warn("Received actionable message with unhandled type #{msg["type"]}")
-        when "discard"
-          logger.warn("Received actionable message with unhandled type #{msg["type"]}")
-        else
-          logger.warn("Received actionable message with unknown type #{msg["type"]}")
+        gameMaster.resetActionables()
+
+        actionables = msg["msg"]["actionables"]
+        actionPrefix = "action_"
+        curActionNum = 1
+        curAction = actionables["#{actionPrefix}#{curActionNum}"]
+        actionsRemaining = true
+        while(actionsRemaining)
+          logger.info("Adding potential actionable: #{curAction}")
+          gameMaster.addActionable(curAction["action"], curAction["count"])
+
+          curActionNum += 1
+          curAction = actionables["#{actionPrefix}#{curActionNum}"]
+          actionsRemaining = (curAction != nil)
         end
       when "info"
         msg = msg["msg"]
@@ -113,6 +121,7 @@ EM.run do
       else
         logger.warn("Received message with an unknown type #{msg["type"]}")
       end
+
     }
   end
 

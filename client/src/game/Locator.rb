@@ -1,7 +1,7 @@
 class Locator
   @@BaseScreenSize = [1920.0,1080.0]
 
-  @@PlayerHandHeight = 150.0
+  @@PlayerHandHeight = 175.0
   @@PlayerHandWidth = 400.0
   @@XEdgeBuffer = 50.0
   @@YEdgeBuffer = 50.0
@@ -29,6 +29,9 @@ class Locator
   def calculateInternalDimensions(screenDimensions)
     screenWidth = screenDimensions[0]
     screenHeight = screenDimensions[1]
+
+    @xScreenCenter = screenDimensions[0] / 2
+    @yScreenCenter = screenDimensions[1] / 2
 
     @xRatio = @@BaseScreenSize[0] / screenWidth
     @yRatio = @@BaseScreenSize[1] / screenHeight
@@ -90,6 +93,31 @@ class Locator
     @buttonRight = @buttonLeft + @@ButtonWidth
     @firstButtonTop = @yBottomhandTop
 
+    # Play area dimensions
+    @playAreaXCenterBuffer = 100 * @xRatio
+    @playAreaYCenterBuffer = 75 * @yRatio
+    @playAreaWidth = @actualDeckWidth
+    @playAreaHeight = @actualDeckHeight
+    # X dimensions for play areas that are centered on the x axis
+    @xCenterPlayAreaLeft = @xScreenCenter - (@playAreaWidth / 2)
+    @xCenterPlayAreaRight = @xCenterPlayAreaLeft + @playAreaWidth
+    # Y dimensions for play areas that are centered on the y axis
+    @yCenterPlayAreaTop = @yScreenCenter - (@playAreaHeight / 2)
+    @yCenterPlayAreaBottom = @yCenterPlayAreaTop + @playAreaHeight
+
+    # Left play area x dimensions
+    @xLeftPlayAreaRight = @xScreenCenter - @playAreaXCenterBuffer
+    @xLeftPlayAreaLeft = @xLeftPlayAreaRight - @playAreaWidth
+    # Right play area x dimensions
+    @xRightPlayAreaLeft = @xScreenCenter + @playAreaXCenterBuffer
+    @xRightPlayAreaRight = @xRightPlayAreaLeft + @playAreaWidth
+    # Top play area y dimensions
+    @yTopPlayAreaBottom = @yScreenCenter - @playAreaYCenterBuffer
+    @yTopPlayAreaTop = @yTopPlayAreaBottom - @playAreaHeight
+    # Bottom play area y dimensions
+    @yBottomPlayAreaTop = @yScreenCenter + @playAreaYCenterBuffer
+    @yBottomPlayAreaBottom = @yBottomPlayAreaTop + @playAreaHeight
+    
     # Deck dimensions
     @deckLeft = 700 * @xRatio
     @deckRight = @deckLeft + @actualDeckWidth
@@ -119,6 +147,21 @@ class Locator
     return playerHandLocationsHash
   end
 
+  # names expected to start from bottom player and move clockwise
+  def getPlayAreaLocations(players)
+    playAreaLocations = [
+      [@xCenterPlayAreaLeft, @yBottomPlayAreaTop, @xCenterPlayAreaRight, @yBottomPlayAreaBottom],
+      [@xLeftPlayAreaLeft,   @yCenterPlayAreaTop, @xLeftPlayAreaRight,   @yCenterPlayAreaBottom],
+      [@xCenterPlayAreaLeft, @yTopPlayAreaTop,    @xCenterPlayAreaRight, @yTopPlayAreaBottom],
+      [@xRightPlayAreaLeft,  @yCenterPlayAreaTop, @xRightPlayAreaRight,  @yCenterPlayAreaBottom]
+    ]
+    playAreaLocationsHash = {}
+    playAreaLocations.zip(players).each do |location, player|
+      playAreaLocationsHash[player] = location
+    end
+    return playAreaLocationsHash
+  end
+
   def getDeckLocation
     return [@deckLeft, @deckTop, @deckRight, @deckBottom]
   end
@@ -134,7 +177,7 @@ class Locator
     buttonNames.each do |name|
       thisButtonTop = @firstButtonTop + ((@@ButtonHeight + @@ButtonHeightBuffer) * (buttonNum))
       thisButtonBottom = thisButtonTop + @@ButtonHeight
-      buttons[name] = [@buttonLeft, thisButtonTop, @buttonRight, thisButtonBottom]
+      buttons[name.downcase] = [@buttonLeft, thisButtonTop, @buttonRight, thisButtonBottom]
       buttonNum += 1
     end
 

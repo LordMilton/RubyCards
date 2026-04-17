@@ -39,6 +39,16 @@ class Hand
     return(@cards.select { |card| card.selected} )
   end
 
+  def getSelectedIndexes()
+    selectedIndexes = []
+    @cards.each_index do |index|
+      if(@cards[index].selected)
+        selectedIndexes.append(index)
+      end
+    end
+    return selectedIndexes
+  end
+
   def clicked(clickX, clickY)
     clickWithinBounds = false
     if(pointWithinBounds(clickX, clickY))
@@ -80,9 +90,15 @@ class Hand
     return toReturn
   end
 
-  def draw
+  def draw(mouseX, mouseY)
+    hoverTextDrawer = nil
     @cards.each do |card|
-      card.draw
+      card.draw(mouseX, mouseY)
+      newHoverTextDrawer = card.getHoverTextDrawer(mouseX, mouseY)
+      hoverTextDrawer = newHoverTextDrawer == nil ? hoverTextDrawer : newHoverTextDrawer
+    end
+    if(hoverTextDrawer != nil)
+      hoverTextDrawer.call()
     end
   end
 
