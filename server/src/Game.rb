@@ -4,6 +4,18 @@ require_relative "./Card"
 require_relative "./MessageBuilder"
 require_relative "./Logger"
 
+LOCATION = {
+  "S" => 0,
+  "W" => 1,
+  "N" => 2,
+  "E" => 3
+}
+
+def numToDirectionHash(num)
+  dirs = LOCATION.keys
+  return dirs[num % dirs.size]
+end
+
 class Game
   include MyLogger
 
@@ -24,6 +36,7 @@ class Game
     @playerCount = 0
     @playerScores = {}
     @hands = {}
+    @playAreas = {}
     # TODO Card scorer
     @startingDeck = []
     setStartingDeck(@gameInstructions["game"]["deck"])
@@ -40,6 +53,11 @@ class Game
 
     # Special variables for use by the instructions during the game
     @lastWinner = nil
+    @curPlayer = nil
+
+    # Variables for waiting on and handling client actions ("actionables")
+    @actionableLatch = nil
+    @curActionables = {}
 
     # Some variables to avoid having to pass around to/from helper functions
     @curStep = 1
@@ -69,7 +87,7 @@ class Game
       gameComplete = false
 
       presetup(@gameInstructions) # Sets repeatIncrementers and finalInstructionStep
-      @deckVisibility = true #@gameInstructions["game"]["deck"]["visible"]
+      @deckVisibility = @gameInstructions["game"]["deck"]["visible"]
       indicateDeckVisibility()
       @deck = @startingDeck
       indicateDeck()
@@ -95,7 +113,17 @@ class Game
     @deck.each do |card|
       addOutgoingMessage(MessageBuilder.buildAddCardMessage(nil, nil, "deck"))
     end
-    sleep(5)
+    #sleep(5)
+  end
+
+  def indicateDrawnCard(card, playerDrawing, ownHandHidden, otherHandsHidden)
+    drawingHandSuit = ownHandHidden ? nil : card.suit
+    drawingHandValue = ownHandHidden ? nil : card.value
+    otherHandsSuit = otherHandsHidden ? nil : card.suit
+    otherHandsValue = otherHandsHidden ? nil : card.value
+
+    addOutgoingMessage(MessageBuilder.buildAddCardMessage(drawingHandSuit, drawingHandValue, "hand", playerDrawing), [playerDrawing])
+    addOutgoingMessage(MessageBuilder.buildAddCardMessage(otherHandsSuit, otherHandsValue, "hand", playerDrawing), getOtherPlayers(playerDrawing))
   end
 
   def setStartingDeck(deckInst)
@@ -209,6 +237,8 @@ class Game
           @players[player] = nil
           @playerScores[player] = 0
           @hands[player] = []
+          @playAreas[player] = []
+          @curPlayer = player
         end
       }
     }
@@ -239,16 +269,81 @@ class Game
   
   def receivedMessage(msgJson, player)
     msg = JSON.parse(msgJson)
-    case msg["action"]
+    attemptedAction = msg["action"]
+    if(attemptedAction == nil)
+      logger.warning("Received message with no attempted action, ignoring...")
+      return
+    end
+
+    # Check that a player isn't trying to play out of turn
+    actionablesList = ["draw", "play", "discard"]
+    if(actionablesList.include?(attemptedAction) && @curPlayer != nil && player != @curPlayer)
+      logger.warning("Player in slot #{player} tried to perform #{attemptedAction} out of turn! Ignoring...")
+      return
+    end
+
+    case attemptedAction
     when "request_place"
       logger.debug("Received #{msg["action"]} message from player #{player}")
       handleRequestPlaceMsg(msg, player)
     when "draw"
-      logger.warning("Received message with unhandled action type #{msg["action"]}")
+      logger.debug("Received #{msg["action"]} message from player #{player}")
+      handleDrawMsg(msg, player)
     when "play"
-      logger.warning("Received message with unhandled action type #{msg["action"]}")
+      logger.debug("Received #{msg["action"]} message from player #{player}")
+      handlePlayMessage(msg, player)
     when "discard"
-      logger.warning("Received message with unhandled action type #{msg["action"]}")
+      logger.debug("Received #{msg["action"]} message from player #{player}")
+      handleDiscardMessage(msg, player)
+    else
+      logger.warning("Received unknown #{msg["action"]} message from player #{player}")
+    end
+  end
+
+  def handleDrawMessage(msg, player)
+    @curActionables["draw"] = @curActionables["draw"] - 1
+
+    case msg["subject"]
+    when "deck"
+      indexToDraw = @deck.size() - 1
+      drawnCard = removeCard(indexToDraw, "deck")
+      addCard(drawnCard, "hand", player)
+    when "discard"
+      indexToDraw = @discard.size() - 1
+      drawnCard = removeCard(indexToDraw, "discard")
+      addCard(drawnCard, "hand", player)
+    end
+
+    if(@curActionables["draw"] == 0)
+      @actionableLatch.count_down()
+    end
+  end
+
+  def handlePlayMessage(msg, player)
+    @curActionables["play"] = @curActionables["play"] - msg["index"].size()
+    indicesToPlay = msg["index"].sort { |a,b| b <=> a }
+
+    indicesToPlay.each do | i |
+      playedCard = removeCard(i, "hand", player)
+      addCard(playedCard, "play_area", player)
+    end
+
+    if(@curActionables["play"] == 0)
+      @actionableLatch.count_down()
+    end
+  end
+
+  def handleDiscardMessage(msg, player)
+    @curActionables["discard"] = @curActionables["discard"] - msg["index"].size()
+    indicesToDiscard = msg["index"].sort { |a,b| b <=> a }
+
+    indicesToDiscard.each do | i |
+      discardedCard = removeCard(i, "hand", player)
+      addCard(playedCard, "discard")
+    end
+
+    if(@curActionables["discard"] == 0)
+      @actionableLatch.count_down()
     end
   end
 
@@ -321,9 +416,14 @@ class Game
       @handsLock.with_write_lock {
         @hands[dir].append(card)
       }
-      otherPlayers = getConnectedPlayers().filter { |player| player != dir }
-      addOutgoingMessage(MessageBuilder.buildAddCardMessage(card.suit, card.value, "hand", dir), [dir])
-      addOutgoingMessage(MessageBuilder.buildAddCardMessage(nil, nil, "hand", dir), otherPlayers)
+      otherPlayers = getOtherPlayers(dir)
+      indicateDrawnCard(card, dir, false, true)
+    when "play_area"
+      @handsLock.with_write_lock {
+        @playAreas[dir].append(card)
+      }
+      otherPlayers = getOtherPlayers(dir)
+      addOutgoingMessage(MessageBuilder.buildAddCardMessage(card.suit, card.value, "play_area", dir))
     else
       logger.warn("Tried to add card to unknown subject #{subject}")
     end
@@ -344,6 +444,11 @@ class Game
         removedCard = @hands[dir].delete_at(index)
       }
       addOutgoingMessage(MessageBuilder.buildRemoveCardMessage(index, "hand", dir))
+    when "play_area"
+      @handsLock.with_write_lock {
+        removedCard = @playAreas[dir].delete_at(index)
+      }
+      addOutgoingMessage(MessageBuilder.buildRemoveCardMessage(index, "play_area", dir))
     else
       logger.warn("Tried to remove card from unknown subject #{subject}")
     end
@@ -384,6 +489,10 @@ class Game
   def indicatePlayerDisconnected(disconnectedPlayerDir)
     outgoingMsg = {"type": "player_disconnected", "location": disconnectedPlayerDir}
     addOutgoingMessage(MessageBuilder.buildActionMessage(outgoingMsg), getConnectedPlayers())
+  end
+
+  def getOtherPlayers(dir)
+    return getConnectedPlayers().filter { |player| player != dir }
   end
 
   def informState(playerDir)
@@ -431,6 +540,19 @@ class Game
         }
       end
     end
+  end
+
+  def getNextPlayer(location)
+    nextPlayer = location
+    viablePlayer = false
+    while(!viablePlayer)
+      nextPlayer = numToDirectionHash(LOCATION[location] + 1)
+      if(@players.has_key(nextPlayer))
+        viablePlayer = true
+      end
+    end
+
+    return nextPlayer
   end
 
   # Step helpers
@@ -501,7 +623,25 @@ class Game
   end
 
   def runStepActionable(stepHash)
-    logger.warn("UNIMPLEMENTED ACTION TYPE")
+    msg = { "actionables" => stepHash["actionables"] }
+
+    actionPrefix = "action_"
+    actionables = stepHash["actionables"]
+    curActionNum = 1
+    curAction = actionables["#{actionPrefix}#{curActionNum}"]
+    actionsRemaining = true
+    while(actionsRemaining)
+      @curActionables[curAction["action"]] = curAction["count"]
+
+      curActionNum += 1
+      curAction = actionables["#{actionPrefix}#{curActionNum}"]
+      actionsRemaining = curAction != nil
+    end
+    addOutgoingMessage(MessageBuilder.buildActionableMessage(msg), [@curPlayer])
+
+    @actionableLatch = Concurrent::CountDownLatch.new(1)
+    @actionableLatch.wait()
+
     @curStep += 1
   end
 
