@@ -65,6 +65,10 @@ class GameMaster
     end
   end
 
+  def handleFirstFrame()
+    @cardDrawer.initializeImages()
+  end
+
   def createDeck(size)
     @deck = Hand.new
     numCards = size
@@ -251,22 +255,29 @@ class GameMaster
   end
 
   def drawGame(mouseX, mouseY)
+    #puts("drawing frame")
     @playerHands.each_value do |hand|
+      #puts("drawing hand")
       hand.draw(mouseX, mouseY)
     end
     @playerNamesDrawers.each do |dirKey, drawFun|
+      #puts("drawing name")
       drawFun.call()
     end
     @playAreas.each_value do |playArea|
+      #puts("drawing play area")
       playArea.draw(mouseX, mouseY)
     end
     if(@deck != nil && @deckVisible)
+      #puts("drawing deck")
       @deck.draw(mouseX, mouseY)
     end
     if(@discard != nil && @discardVisible)
+      #puts("drawing discard")
       @discard.draw(mouseX, mouseY)
     end
     @buttons.each_value do |btn|
+      #puts("drawing button")
       btn.draw(mouseX, mouseY)
     end
   end

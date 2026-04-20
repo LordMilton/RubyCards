@@ -18,6 +18,8 @@ class GameWindow < Gosu::Window
     @timeNow = Time.new
     @timeLast = Time.new
     @frameInSecond = 0
+
+    @firstFrame = true
     @showFps = true
     @playerOrder = [:S, :N, :E, :W]
     @playerOrderNum = 0
@@ -39,6 +41,10 @@ class GameWindow < Gosu::Window
   private :drawFps
 
   def update
+    if(@firstFrame)
+      @gm.handleFirstFrame()
+      @firstFrame = false
+    end
   end
 
   def close

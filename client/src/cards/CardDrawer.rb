@@ -7,18 +7,34 @@ class CardDrawer
   def initialize(cardImagesDir)
     @cardImagesDir = cardImagesDir
     @highlightImage = nil
+
+    @cardImages = nil
+  end
+
+  def initializeImages()
+    @cardImages = {}
+    Dir.each_child(@cardImagesDir) { |fileName|
+      fullFilename = "#{@cardImagesDir}/#{fileName}"
+      if(File.extname(fullFilename) == ".jpg")
+        puts("Fetching card image #{fileName} with full path #{fullFilename}")
+        cardName = fileName.sub(/\..+$/, "")
+        @cardImages[cardName] = Gosu::Image.new(fullFilename)
+      end
+    }
   end
 
   def getCardImage(card)
-    cardFile = @cardImagesDir.dup
-    if(card.hidden?)
-      cardFileName = "back.jpg"
-    else
-      cardFileName = "#{card.suit.downcase}_#{card.value}.jpg"
+    if(@cardImages == nil)
+      initializeImages()
     end
     
-    cardFile = cardFile.concat("/",cardFileName)
-    return(Gosu::Image.new(cardFile))
+    cardImage = nil
+    if(card.hidden?)
+      cardImage = @cardImages["back"]
+    else
+      cardImage = @cardImages["#{card.suit.downcase}_#{card.value}"]
+    end
+    return(cardImage)
   end
 
   def getCardHoverText(card, textHeight)

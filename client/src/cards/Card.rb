@@ -1,4 +1,8 @@
+require_relative "../Logger"
+
 class Card
+  include MyLogger
+
   @@HighlightSizePx = 1
 
   attr_reader :suit
@@ -66,10 +70,15 @@ class Card
 
   def draw(mouseX, mouseY)
     cardImage = getImage()
-    if(@selected)
-      drawRectangle(@cardDrawer.getHighlightImage, @topLeftX - @@HighlightSizePx, @topLeftY - @@HighlightSizePx, @bottomRightX + @@HighlightSizePx, @bottomRightY + @@HighlightSizePx)
+    if(cardImage != nil)
+      if(@selected)
+        drawRectangle(@cardDrawer.getHighlightImage, @topLeftX - @@HighlightSizePx, @topLeftY - @@HighlightSizePx, @bottomRightX + @@HighlightSizePx, @bottomRightY + @@HighlightSizePx)
+      end
+      drawRectangle(cardImage, @topLeftX, @topLeftY, @bottomRightX, @bottomRightY)
+    else
+      logger.warning("Tried to draw a card, but its image was null")
+      logger.debug("Image for card #{@value} of #{suit} was null")
     end
-    drawRectangle(cardImage, @topLeftX, @topLeftY, @bottomRightX, @bottomRightY)
   end
 
   def drawRectangle(image, topLeftX, topLeftY, bottomRightX, bottomRightY)
