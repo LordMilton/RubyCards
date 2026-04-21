@@ -69,14 +69,15 @@
   },
   "step_3": {
     "action": "repeat_until",
-    "from_step": 1,
+    "from_step": 2,
     "change": {
       "subject": "player",
       "change": "next"
     },
     "condition": {
       "type": "occurrences",
-      "comparison": 4
+      "comparison": 4,
+      "comparators": ["equal"]
     }
   },
   "step_4": {
@@ -85,14 +86,15 @@
   },
   "step_5": {
     "action": "repeat_until",
-    "from_step": 1,
+    "from_step": 2,
     "change": {
       "subject": "player",
       "change": "last_winner"
     },
     "condition": {
       "type": "hand_size",
-      "comparison": 0
+      "comparison": 0,
+      "comparators": ["equal"]
     }
   },
   "step_6": {
@@ -101,11 +103,15 @@
   },
   "step_7": {
     "action": "repeat_until",
-    "from_step": 0,
-    "change": "next_player",
+    "from_step": 1,
+    "change": {
+      "subject": "dealer",
+      "change": "next"
+    },
     "condition": {
       "type": "score",
-      "comparison": 100
+      "comparison": 100,
+      "comparators": ["equal", "greater"]
     }
   },
   "step_8": {

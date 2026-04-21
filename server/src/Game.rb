@@ -54,6 +54,7 @@ class Game
     # Special variables for use by the instructions during the game
     @lastWinner = nil
     @curPlayer = nil
+    @lastDealer = nil
 
     # Variables for waiting on and handling client actions ("actionables")
     @actionableLatch = nil
@@ -239,6 +240,7 @@ class Game
           @hands[player] = []
           @playAreas[player] = []
           @curPlayer = player
+          @lastDealer = getLastPlayer(@curPlayer)
         end
       }
     }
@@ -546,13 +548,26 @@ class Game
     nextPlayer = location
     viablePlayer = false
     while(!viablePlayer)
-      nextPlayer = numToDirectionHash(LOCATION[location] + 1)
-      if(@players.has_key(nextPlayer))
+      nextPlayer = numToDirectionHash(LOCATION[nextPlayer] + 1)
+      if(@players.has_key?(nextPlayer))
         viablePlayer = true
       end
     end
 
     return nextPlayer
+  end
+
+  def getLastPlayer(location)
+    lastPlayer = location
+    viablePlayer = false
+    while(!viablePlayer)
+      lastPlayer = numToDirectionHash(LOCATION[lastPlayer] - 1)
+      if(@players.has_key?(lastPlayer))
+        viablePlayer = true
+      end
+    end
+
+    return lastPlayer
   end
 
   # Step helpers
@@ -618,8 +633,15 @@ class Game
   end
 
   def runStepRepeat(stepHash)
-    logger.warn("UNIMPLEMENTED ACTION TYPE")
-    @curStep += 1
+    conditionMet = checkRepeatCondition(stepHash)
+
+    enactRepeatChange(stepHash["change"])
+
+    if conditionMet
+      @curStep += 1
+    else
+      @curStep = stepHash["from_step"]
+    end
   end
 
   def runStepActionable(stepHash)
@@ -658,5 +680,72 @@ class Game
   def runStepWinner(stepHash)
     logger.warn("UNIMPLEMENTED ACTION TYPE")
     @curStep += 1
+  end
+
+  def checkRepeatCondition(stepHash)
+    condition = stepHash["condition"]
+    comparators = condition["comparators"]
+    comparison = condition["comparison"]
+    subjectIsCurrentPlayer = condition["subject"] == "cur_player"
+
+    case condition["type"]
+    when "occurrences"
+      current = @repeatIncrementers[@curStep]
+      @repeatIncrementers[@curStep] += 1
+      return compareValues(current, comparison, comparators)
+    when "hand_size"
+      if subjectIsCurrentPlayer
+        return compareValues(@hands[@curPlayer].size(), comparison, comparators)
+      else
+        return @hands.values.any? { |hand| compareValues(hand.size(), comparison, comparators) }
+      end
+    when "score"
+      if subjectIsCurrentPlayer
+        return compareValues(@playerScores[@curPlayer], comparison, comparators)
+      else
+        return @playerScores.values.any? { |score| compareValues(score, comparison, comparators) }
+      end
+    else
+      logger.error("Unknown repeat condition type: #{condition["type"]}")
+      return true
+    end
+  end
+
+  def compareValues(current, comparison, comparators)
+    comparisonTruth = comparators.any? { |comparator|
+      case comparator
+      when "equal"   then current == comparison
+      when "less"    then current <  comparison
+      when "greater" then current >  comparison
+      else
+        logger.error("Unknown comparator: #{comparator}")
+        true # This will help us move on to further steps to avoid infinite loops
+      end
+    }
+    return comparisonTruth
+  end
+
+  def enactRepeatChange(changeHash)
+    case changeHash["subject"]
+    when "player"
+      case changeHash["change"]
+      when "next"
+        @curPlayer = getNextPlayer(@curPlayer)
+      when "last_winner"
+        @curPlayer = @lastWinner if @lastWinner != nil
+      else
+        logger.error("Unknown player change type: #{changeHash["change"]}")
+      end
+    when "dealer"
+      case changeHash["change"]
+      when "next"
+        @lastDealer = @lastDealer != nil ? getNextPlayer(@lastDealer) : @curPlayer
+        @curPlayer = getNextPlayer(@lastDealer)
+      else
+        logger.error("Unknown dealer change type: #{changeHash["change"]}")
+      end
+    else
+      logger.error("Unknown change subject: #{changeHash["subject"]}")
+    end
   end
 end
