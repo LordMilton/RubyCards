@@ -670,6 +670,7 @@ class Game
     lastTrick = @recentlyPlayed.map do |pair|
       pair[1]
     end
+
     winningIndex = @trickComparator.getBestCardIndex(lastTrick)
     @lastWinner = @recentlyPlayed[winningIndex][0]
     @playAreas.each do |player, playArea|
@@ -678,6 +679,8 @@ class Game
     lastTrick.each do |card|
       addCard(card, 'won_cards', @lastWinner)
     end
+    @recentlyPlayed = []
+
     @curStep += 1
   end
 
@@ -701,7 +704,9 @@ class Game
     when 'occurrences'
       @repeatIncrementers[@curStep] += 1
       current = @repeatIncrementers[@curStep]
-      compareValues(current, comparison, comparators)
+      compareBool = compareValues(current, comparison, comparators)
+      @repeatIncrementers[@curStep] = 0 if compareBool # Need to reset for the next time we get into this loop
+      compareBool
     when 'hand_size'
       if subjectIsCurrentPlayer
         compareValues(@hands[@curPlayer].size, comparison, comparators)

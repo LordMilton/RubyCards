@@ -1,13 +1,11 @@
-require_relative "../Logger"
+require_relative '../Logger'
 
 class Card
   include MyLogger
 
   @@HighlightSizePx = 1
 
-  attr_reader :suit
-  attr_reader :value
-  attr_reader :selected
+  attr_reader :suit, :value, :selected
 
   # @param suit:String Suit of the card
   # @param value:String Value of the card (string accounts for non-numeral cards)
@@ -28,7 +26,7 @@ class Card
   end
 
   def hidden?
-    return(@suit == nil && @value == nil)
+    @suit.nil? && @value.nil?
   end
 
   def makeSelectable(selectable)
@@ -37,28 +35,28 @@ class Card
 
   def clicked(clickX, clickY)
     clickWithinBounds = false
-    if(pointWithinBounds(clickX, clickY))
+    if pointWithinBounds(clickX, clickY)
       clickWithinBounds = true
-      toggleSelected()
+      toggleSelected
     end
 
-    return(clickWithinBounds)
+    clickWithinBounds
   end
 
   def pointWithinBounds(x, y)
-    return(@topLeftX <= x && @bottomRightX >= x && @topLeftY <= y && @bottomRightY >= y)
+    @topLeftX <= x && @bottomRightX >= x && @topLeftY <= y && @bottomRightY >= y
   end
   private :pointWithinBounds
 
-  def toggleSelected()
-    if(@selectable)
-      @selected = !@selected
-    end
+  def toggleSelected
+    return unless @selectable
+
+    @selected = !@selected
   end
 
-  def getImage()
+  def getImage
     @image ||= @cardDrawer.getCardImage(self)
-    return(@image)
+    @image
   end
 
   def setDrawingInfo(topLeftX, topLeftY, width, height)
@@ -68,15 +66,21 @@ class Card
     @bottomRightY = topLeftY + height
   end
 
-  def draw(mouseX, mouseY)
-    cardImage = getImage()
-    if(cardImage != nil)
-      if(@selected)
-        drawRectangle(@cardDrawer.getHighlightImage, @topLeftX - @@HighlightSizePx, @topLeftY - @@HighlightSizePx, @bottomRightX + @@HighlightSizePx, @bottomRightY + @@HighlightSizePx)
+  def draw(_mouseX, _mouseY)
+    cardImage = getImage
+    if !cardImage.nil?
+      if @selected
+        drawRectangle(
+          @cardDrawer.getHighlightImage,
+          @topLeftX - @@HighlightSizePx,
+          @topLeftY - @@HighlightSizePx,
+          @bottomRightX + @@HighlightSizePx,
+          @bottomRightY + @@HighlightSizePx
+        )
       end
       drawRectangle(cardImage, @topLeftX, @topLeftY, @bottomRightX, @bottomRightY)
     else
-      logger.warning("Tried to draw a card, but its image was null")
+      logger.warning('Tried to draw a card, but its image was null')
       logger.debug("Image for card #{@value} of #{suit} was null")
     end
   end
@@ -95,9 +99,8 @@ class Card
 
   def getHoverTextDrawer(mouseX, mouseY)
     @hoverText ||= @cardDrawer.getCardHoverText(self, 22)
-    if(pointWithinBounds(mouseX, mouseY))
-      return proc { @hoverText.draw(mouseX, mouseY + 15, 1) }
-    end
-    return nil
+    return proc { @hoverText.draw(mouseX, mouseY + 15, 1) } if pointWithinBounds(mouseX, mouseY) && !@hoverText.nil?
+
+    nil
   end
 end

@@ -1,5 +1,5 @@
 class Locator
-  @@BaseScreenSize = [1920.0,1080.0]
+  @@BaseScreenSize = [1920.0, 1080.0]
 
   @@PlayerHandHeight = 175.0
   @@PlayerHandWidth = 400.0
@@ -10,10 +10,12 @@ class Locator
   @@DesiredPlayerNameHeight = 30.0
 
   @@DeckHeight = @@PlayerHandHeight
-  @@DeckWidth = 75.0
+  @@DeckWidth = 125.0
 
   @@DiscardHeight = @@PlayerHandHeight
   @@DiscardWidth = 350.0
+
+  @@WonCardsBuffer = 25.0
 
   @@DeckAndDiscardTop = 450.0
 
@@ -104,7 +106,6 @@ class Locator
     # Y dimensions for play areas that are centered on the y axis
     @yCenterPlayAreaTop = @yScreenCenter - (@playAreaHeight / 2)
     @yCenterPlayAreaBottom = @yCenterPlayAreaTop + @playAreaHeight
-
     # Left play area x dimensions
     @xLeftPlayAreaRight = @xScreenCenter - @playAreaXCenterBuffer
     @xLeftPlayAreaLeft = @xLeftPlayAreaRight - @playAreaWidth
@@ -117,7 +118,33 @@ class Locator
     # Bottom play area y dimensions
     @yBottomPlayAreaTop = @yScreenCenter + @playAreaYCenterBuffer
     @yBottomPlayAreaBottom = @yBottomPlayAreaTop + @playAreaHeight
-    
+
+    # Won Cards dimensions
+    @wonCardsXBuffer = @@WonCardsBuffer * @xRatio
+    @wonCardsYBuffer = @@WonCardsBuffer * @yRatio
+    @wonCardsWidth = @actualDeckWidth
+    @wonCardsHeight = @actualDeckHeight
+    # Left Won Cards dimensions
+    @xLeftWonCardsLeft = @@XEdgeBuffer
+    @xLeftWonCardsRight = @xLeftWonCardsLeft + @wonCardsWidth
+    @yLeftWonCardsTop = @yCenterBottom + @wonCardsYBuffer
+    @yLeftWonCardsBottom = @yLeftWonCardsTop + @wonCardsHeight
+    # Right Won Cards dimensions
+    @xRightWonCardsRight = screenWidth - @@XEdgeBuffer
+    @xRightWonCardsLeft = @xRightWonCardsRight - @wonCardsWidth
+    @yRightWonCardsBottom = @yCenterTop - @wonCardsYBuffer
+    @yRightWonCardsTop = @yRightWonCardsBottom - @wonCardsHeight
+    # Top Won Cards dimensions
+    @xTopWonCardsRight = @xCenterLeft - @wonCardsXBuffer
+    @xTopWonCardsLeft = @xTopWonCardsRight - @wonCardsWidth
+    @yTopWonCardsTop = @@YEdgeBuffer
+    @yTopWonCardsBottom = @yTopWonCardsTop + @wonCardsHeight
+    # Bottom Won Cards dimensions
+    @xBottomWonCardsLeft = @buttonRight + @wonCardsXBuffer
+    @xBottomWonCardsRight = @xBottomWonCardsLeft + @wonCardsWidth
+    @yBottomWonCardsBottom = screenHeight - @@YEdgeBuffer
+    @yBottomWonCardsTop = @yBottomWonCardsBottom - @wonCardsHeight
+
     # Deck dimensions
     @deckLeft = 700 * @xRatio
     @deckRight = @deckLeft + @actualDeckWidth
@@ -144,7 +171,7 @@ class Locator
     playerHandLocations.zip(players).each do |location, player|
       playerHandLocationsHash[player] = location
     end
-    return playerHandLocationsHash
+    playerHandLocationsHash
   end
 
   # names expected to start from bottom player and move clockwise
@@ -159,15 +186,30 @@ class Locator
     playAreaLocations.zip(players).each do |location, player|
       playAreaLocationsHash[player] = location
     end
-    return playAreaLocationsHash
+    playAreaLocationsHash
+  end
+
+  # names expected to start from bottom player and move clockwise
+  def getWonCardsLocations(players)
+    wonCardsLocations = [
+      [@xBottomWonCardsLeft, @yBottomWonCardsTop, @xBottomWonCardsRight, @yBottomWonCardsBottom],
+      [@xLeftWonCardsLeft,   @yLeftWonCardsTop,   @xLeftWonCardsRight,   @yLeftWonCardsBottom],
+      [@xTopWonCardsLeft,    @yTopWonCardsTop,    @xTopWonCardsRight,    @yTopWonCardsBottom],
+      [@xRightWonCardsLeft,  @yRightWonCardsTop,  @xRightWonCardsRight,  @yRightWonCardsBottom]
+    ]
+    wonCardsLocationsHash = {}
+    wonCardsLocations.zip(players).each do |location, player|
+      wonCardsLocationsHash[player] = location
+    end
+    wonCardsLocationsHash
   end
 
   def getDeckLocation
-    return [@deckLeft, @deckTop, @deckRight, @deckBottom]
+    [@deckLeft, @deckTop, @deckRight, @deckBottom]
   end
 
   def getDiscardLocation
-    return [@discardLeft, @discardTop, @discardRight, @discardBottom]
+    [@discardLeft, @discardTop, @discardRight, @discardBottom]
   end
 
   # first button name will be on top
@@ -175,20 +217,20 @@ class Locator
     buttons = {}
     buttonNum = 0
     buttonNames.each do |name|
-      thisButtonTop = @firstButtonTop + ((@@ButtonHeight + @@ButtonHeightBuffer) * (buttonNum))
+      thisButtonTop = @firstButtonTop + ((@@ButtonHeight + @@ButtonHeightBuffer) * buttonNum)
       thisButtonBottom = thisButtonTop + @@ButtonHeight
       buttons[name.downcase] = [@buttonLeft, thisButtonTop, @buttonRight, thisButtonBottom]
       buttonNum += 1
     end
 
-    return buttons
+    buttons
   end
 
   # @param dirNamesHash Player names hashed by their direction. Order should be bottom player first moving clockwise
   # @return Functions which draw the player names provided, hashed in the same way the param was hashed
   def getPlayerNameDrawers(dirNamesHash)
     fontHeight = @actualDesiredPlayerNameHeight.to_i
-    #scale = @DesiredPlayerNameHeight / Gosu::Font.new.height
+    # scale = @DesiredPlayerNameHeight / Gosu::Font.new.height
     nameFont = Gosu::Font.new(fontHeight)
     textDrawers = {}
     textDrawersArray = [
@@ -202,6 +244,6 @@ class Locator
       name = dirName[1]
       textDrawers[key] = proc { textDrawer.call(name) }
     end
-    return textDrawers
+    textDrawers
   end
 end

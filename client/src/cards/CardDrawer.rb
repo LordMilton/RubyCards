@@ -1,9 +1,12 @@
-require "gosu"
-require_relative "Card"
+require 'gosu'
+require_relative 'Card'
+require_relative '../Logger'
 
 class CardDrawer
-  @@HighlightImageName = "yellow.png"
-  
+  include MyLogger
+
+  @@HighlightImageName = 'yellow.png'
+
   def initialize(cardImagesDir)
     @cardImagesDir = cardImagesDir
     @highlightImage = nil
@@ -11,45 +14,38 @@ class CardDrawer
     @cardImages = nil
   end
 
-  def initializeImages()
+  def initializeImages
     @cardImages = {}
-    Dir.each_child(@cardImagesDir) { |fileName|
+    Dir.each_child(@cardImagesDir) do |fileName|
       fullFilename = "#{@cardImagesDir}/#{fileName}"
-      if(File.extname(fullFilename) == ".jpg")
-        puts("Fetching card image #{fileName} with full path #{fullFilename}")
-        cardName = fileName.sub(/\..+$/, "")
-        @cardImages[cardName] = Gosu::Image.new(fullFilename)
-      end
-    }
+      next unless File.extname(fullFilename) == '.jpg'
+
+      logger.debug("Fetching card image #{fileName} with full path #{fullFilename}")
+      cardName = fileName.sub(/\..+$/, '')
+      @cardImages[cardName] = Gosu::Image.new(fullFilename)
+    end
   end
 
   def getCardImage(card)
-    if(@cardImages == nil)
-      initializeImages()
-    end
-    
-    cardImage = nil
-    if(card.hidden?)
-      cardImage = @cardImages["back"]
+    initializeImages if @cardImages.nil?
+
+    if card.hidden?
+      @cardImages['back']
     else
-      cardImage = @cardImages["#{card.suit.downcase}_#{card.value}"]
+      @cardImages["#{card.suit.downcase}_#{card.value}"]
     end
-    return(cardImage)
   end
 
   def getCardHoverText(card, textHeight)
-    name = ""
-    if(!card.hidden?)
-      name = "#{card.value} of #{card.suit}"
-    end
-    return(Gosu::Image.from_text(name, textHeight))
+    name = card.hidden? ? nil : "#{card.value} of #{card.suit}"
+    return Gosu::Image.from_text(name, textHeight) unless name.nil?
+
+    nil
   end
 
   def getHighlightImage
     cardFile = @cardImagesDir.dup
-    if(@highlightImage == nil)
-      @highlightImage = Gosu::Image.new("#{cardFile}/../#{@@HighlightImageName}")
-    end
-    return(@highlightImage)
+    @highlightImage = Gosu::Image.new("#{cardFile}/../#{@@HighlightImageName}") if @highlightImage.nil?
+    @highlightImage
   end
 end

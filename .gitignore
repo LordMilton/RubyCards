@@ -1,3 +1,4 @@
 vendor/
 *.sh
 *.log
+*.code-workspace

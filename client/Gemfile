@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
-source "https://rubygems.org"
+source 'https://rubygems.org'
 
-gem "gosu"
-gem "websocket-eventmachine-client"
+gem 'concurrent-ruby'
+gem 'gosu'
+gem 'websocket-eventmachine-client'
+
+gem 'rubocop'
+gem 'ruby-lsp'
