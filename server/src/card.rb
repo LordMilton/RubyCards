@@ -1,3 +1,6 @@
+# initial line for rubocop disables # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
+
+# Represents a card in a deck of cards
 class Card
   attr_reader :suit, :value
 

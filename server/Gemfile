@@ -5,5 +5,5 @@ source "https://rubygems.org" # rubocop:disable Style/StringLiterals
 gem 'concurrent-ruby'
 gem 'websocket-eventmachine-server'
 
-gem 'rubocop'
+gem 'rubocop', require: false
 gem 'ruby-lsp'
