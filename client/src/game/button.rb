@@ -1,23 +1,24 @@
-require 'gosu'
+require 'gosu' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
 
+# You need me to tell you what a button is?
 class Button
-  #PADDING_X     = 20   # horizontal padding between text and border
-  #PADDING_Y     = 12   # vertical padding between text and border
+  # PADDING_X     = 20   # horizontal padding between text and border
+  # PADDING_Y     = 12   # vertical padding between text and border
 
   DEFAULT_FONT_SIZE = 20
 
   # Normal state colours
-  BG_COLOR      = Gosu::Color.new(255,  60, 120, 220)   # blue
+  BG_COLOR      = Gosu::Color.new(255, 60,  120, 220)   # blue
   BORDER_COLOR  = Gosu::Color.new(255, 120, 190, 255)   # lighter blue
   TEXT_COLOR    = Gosu::Color.new(255, 255, 255, 255)   # white
 
   # Disabled state colors
-  BG_DISABLED      = Gosu::Color.new(150,  40, 80, 147)
-  BORDER_DISABLED  = Gosu::Color.new(150, 80, 127, 170)
+  BG_DISABLED      = Gosu::Color.new(150, 40,  80, 147)
+  BORDER_DISABLED  = Gosu::Color.new(150, 80,  127, 170)
   TEXT_DISABLED    = Gosu::Color.new(150, 200, 200, 200)
 
   # Hover state colours
-  BG_HOVER      = Gosu::Color.new(255,  90, 160, 255)
+  BG_HOVER      = Gosu::Color.new(255, 90,  160, 255)
   BORDER_HOVER  = Gosu::Color.new(255, 180, 220, 255)
 
   # Z-layers
@@ -27,19 +28,18 @@ class Button
 
   BORDER_THICKNESS = 2
 
-  attr_reader :label
-  attr_reader :selectable
+  attr_reader :label, :selectable
 
   # @param label      [String]        text shown on the button
   # @param position   [int[]]         Expected order [topLeftX, topLeftY, bottomRightX, bottomRightY]
   def initialize(label, position)
     @label = label
-    @leftX = position[0]
-    @topY = position[1]
-    @rightX = position[2]
-    @bottomY = position[3]
-    @width = @rightX - @leftX
-    @height = @bottomY - @topY
+    @left_x = position[0]
+    @top_y = position[1]
+    @right_x = position[2]
+    @bottom_y = position[3]
+    @width = @right_x - @left_x
+    @height = @bottom_y - @top_y
     @font = Gosu::Font.new(DEFAULT_FONT_SIZE)
 
     @selectable = false
@@ -53,22 +53,22 @@ class Button
   def draw(mouse_x = nil, mouse_y = nil)
     hovering = mouse_x && mouse_y && clicked?(mouse_x, mouse_y)
 
-    bgColor = BG_DISABLED 
-    borderColor = BORDER_DISABLED
-    labelColor = TEXT_DISABLED
-    if(selectable)
-      labelColor = TEXT_COLOR
-      bgColor  = BG_COLOR
-      borderColor = BORDER_COLOR
-      if(hovering)
-        bgColor  = BG_HOVER
-        borderColor = BORDER_HOVER
+    bg_color = BG_DISABLED
+    border_color = BORDER_DISABLED
+    label_color = TEXT_DISABLED
+    if selectable
+      label_color = TEXT_COLOR
+      bg_color = BG_COLOR
+      border_color = BORDER_COLOR
+      if hovering
+        bg_color = BG_HOVER
+        border_color = BORDER_HOVER
       end
     end
 
-    draw_background(bgColor)
-    draw_border(borderColor)
-    draw_label(labelColor)
+    draw_background(bg_color)
+    draw_border(border_color)
+    draw_label(label_color)
   end
 
   def makeSelectable(selectable)
@@ -83,28 +83,28 @@ class Button
   def clicked?(x, y)
     return(
       @selectable &&
-      x >= @leftX &&
-      x <= @rightX &&
-      y >= @topY &&
-      y <= @bottomY)
+      x >= @left_x &&
+      x <= @right_x &&
+      y >= @top_y &&
+      y <= @bottom_y)
   end
 
   private
 
   def draw_background(color)
-    Gosu.draw_rect(@leftX, @topY, @width, @height, color)
+    Gosu.draw_rect(@left_x, @top_y, @width, @height, color)
   end
 
   def draw_border(color)
     t = BORDER_THICKNESS
     # Top
-    Gosu.draw_rect(@leftX - t, @topY - t, @width + (2*t), t, color)
+    Gosu.draw_rect(@left_x - t, @top_y - t, @width + (2 * t), t, color)
     # Bottom
-    Gosu.draw_rect(@leftX - t, @bottomY, @width + (2*t), t, color)
+    Gosu.draw_rect(@left_x - t, @bottom_y, @width + (2 * t), t, color)
     # Left
-    Gosu.draw_rect(@leftX - t, @topY - t, t, @height + (2*t), color)
+    Gosu.draw_rect(@left_x - t, @top_y - t, t, @height + (2 * t), color)
     # Right
-    Gosu.draw_rect(@rightX, @topY - t, t, @height + (2*t), color)
+    Gosu.draw_rect(@right_x, @top_y - t, t, @height + (2 * t), color)
   end
 
   def draw_label(color)
@@ -117,8 +117,8 @@ class Button
     scaled_w = text_w * scale
     scaled_h = text_h * scale
 
-    text_x = @leftX + (@width - scaled_w) / 2.0
-    text_y = @topY  + (@height - scaled_h) / 2.0
+    text_x = @left_x + (@width - scaled_w) / 2.0
+    text_y = @top_y  + (@height - scaled_h) / 2.0
 
     @font.draw_text(@label, text_x, text_y, Z_TEXT, scale, scale, color)
   end
