@@ -1,4 +1,4 @@
-require 'concurrent' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
+require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment
 require 'json'
 require_relative './card'
 require_relative './message_builder'
@@ -30,7 +30,11 @@ class Game
     @rng = Random.new
 
     @game_started = false
-    @game_instructions = JSON.parse(IO.read("#{GAMES_FOLDER}#{game_file}").gsub(/\r/, ' ').gsub(/\n/, ' '))
+    @instructions = JSON.parse(IO.read("#{GAMES_FOLDER}#{game_file}").gsub(/\r/, ' ').gsub(/\n/, ' '))
+    @game_instructions = @instructions['game']
+    @deck_instructions = @game_instructions['deck']
+    @discard_instructions = @game_instructions['discard']
+    @scoring_instructions = @game_instructions['scoring']
     @final_instruction_step = 0
     @players_ready = {}
     @players = {}
@@ -44,7 +48,7 @@ class Game
     @recently_played = []
     @trick_comparator = nil
     @starting_deck = []
-    set_starting_deck(@game_instructions['game']['deck'])
+    set_starting_deck(@instructions['game']['deck'])
     @deck = []
     @discard = []
 
@@ -57,9 +61,11 @@ class Game
     @discard_visibility = false
 
     # Special variables for use by the instructions during the game
-    @last_winner = nil
+    @latest_winner = nil
+    @latest_scores = {}
+    @latest_bids = {}
     @cur_player = nil
-    @last_dealer = nil
+    @latest_dealer = nil
 
     # Variables for waiting on and handling client actions ("actionables")
     @actionable_latch = nil
@@ -92,19 +98,19 @@ class Game
 
       game_complete = false
 
-      presetup(@game_instructions) # Sets repeatIncrementers and final_instruction_step
-      @deck_visibility = @game_instructions['game']['deck']['visible']
+      presetup(@instructions) # Sets repeatIncrementers and final_instruction_step
+      @deck_visibility = @instructions['game']['deck']['visible']
       indicate_deck_visibility
       @deck = @starting_deck
       indicate_deck
 
-      set_starting_discard(@game_instructions['game']['discard'])
+      set_starting_discard(@instructions['game']['discard'])
 
       until game_complete
         if @cur_step <= @final_instruction_step
           next_step_name = "#{STEP_PREFIX}#{@cur_step}"
           logger.info("Running step \"#{next_step_name}\"")
-          run_step(@game_instructions[next_step_name.to_s])
+          run_step(@instructions[next_step_name.to_s])
           sleep(2)
         else
           logger.info('Game completed')
@@ -163,7 +169,7 @@ class Game
   private
 
   def initialize_game
-    init_instructions = @game_instructions['game']
+    init_instructions = @instructions['game']
     @players_rw_lock.with_write_lock do
       @hands_rw_lock.with_write_lock do
         init_instructions['players'].each do |player|
@@ -174,7 +180,7 @@ class Game
           @play_areas[player] = []
           @won_cards[player] = []
           @cur_player = player
-          @last_dealer = get_previous_player(@cur_player)
+          @latest_dealer = get_previous_player(@cur_player)
         end
       end
     end
@@ -676,26 +682,129 @@ class Game
     end
 
     winning_index = @trick_comparator.get_best_card_index(last_trick)
-    @last_winner = @recently_played[winning_index][0]
+    @latest_winner = @recently_played[winning_index][0]
     @play_areas.each do |player, play_area|
       removeCard(0, 'play_area', player) until play_area.empty?
     end
     last_trick.each do |card|
-      add_card(card, 'won_cards', @last_winner)
+      add_card(card, 'won_cards', @latest_winner)
     end
     @recently_played = []
 
     @cur_step += 1
   end
 
-  def run_step_score(_step_hash)
-    logger.warn('UNIMPLEMENTED ACTION TYPE')
+  def run_step_score(step_hash)
+    scoring_method_prefix = 'method_'
+
+    @hands_rw_lock.with_read_lock do
+      scores = {}
+      @players.each_key do |key|
+        scores[key] = 0
+      end
+
+      cards_to_score = {}
+      subject = step_hash['subject']
+      case subject
+      when 'play_area'
+        cards_to_score = @play_areas
+      when 'won_cards'
+        cards_to_score = @won_cards
+      when 'hand'
+        cards_to_score = @hands
+      end
+
+      transform_prefix = 'transform_'
+      scoring_method = @scoring_instructions["#{scoring_method_prefix}#{step_hash['method']}"]
+      players.each_key do |dir|
+        scores[dir] = score_cards(cards_to_score[dir], scoring_method['card_scores'])
+      end
+
+      transform_num = 1
+      next_transform = scoring_method["#{transform_prefix}#{transform_num}"]
+      until next_transform.nil?
+        scores = transform_scores(next_transform, scores)
+
+        transform_num += 1
+        next_transform = scoring_method["#{transform_prefix}#{transform_num}"]
+      end
+    end
+
+    @latest_scores.each do |dir, score|
+      @latest_scores[dir] = score + scores[dir]
+    end
     @cur_step += 1
   end
 
   def run_step_winner(_step_hash)
     logger.warn('UNIMPLEMENTED ACTION TYPE')
     @cur_step += 1
+  end
+
+  def score_cards(cards, scoring_method)
+    scored = cards.map { |card| scoring_method[card] || 0 }
+    scored.sum
+  end
+
+  def transform_scores(transform_instructions, scores)
+    condition = transform_instructions['condition']
+    comparison = transform_instructions['comparison']
+    transformation = transform_instructions['transformation']
+
+    score_additions = {} # Any indication of adding to a player's score
+    score_overrides = {} # Any indication of setting a player's score to something else
+    should_transform = true
+    scores.each do |dir, score|
+      unless condition.nil?
+        current = nil
+        case condition['subject']
+        when 'hand_score'
+          current = score
+        end
+        comparison = condition['comparison']
+        comparators = condition['comparators']
+        should_transform = compare_values(current, comparison, comparators) && should_transform
+      end
+
+      unless comparison.nil?
+
+      end
+
+      next unless should_transform
+
+      current_player_change = transformation['current_player']
+      unless current_player_change.nil?
+        value = current_player_change['value']
+        case current_player_change['action']
+        when 'set'
+          score_overrides[dir] = value
+        when 'add'
+          score_additions[dir] = (score_additions[dir] || 0) + value
+        end
+      end
+
+      other_players_change = transformation['other_players']
+      other_players_keys = scores.keys.reject { |override_dir| override_dir == dir }
+      unless other_players_change.nil?
+        value = other_players_change['value']
+        case other_players_change['action']
+        when 'set'
+          other_players_keys.each do |override_dir|
+            score_overrides[override_dir] = value
+          end
+        when 'add'
+          other_players_keys.each do |override_dir|
+            score_additions[override_dir] = (score_additions[override_dir] || 0) + value
+          end
+        end
+      end
+    end
+
+    scores.each_key do |dir|
+      scores[dir] += score_additions[dir] || 0
+      scores[dir] = score_overrides[dir] || scores[dir]
+    end
+    scores
   end
 
   def check_repeat_condition(step_hash)
@@ -750,15 +859,15 @@ class Game
       when 'next'
         @cur_player = get_next_player(@cur_player)
       when 'last_winner'
-        @cur_player = @last_winner unless @last_winner.nil?
+        @cur_player = @latest_winner unless @latest_winner.nil?
       else
         logger.error("Unknown player change type: #{change_hash['change']}")
       end
     when 'dealer'
       case change_hash['change']
       when 'next'
-        @last_dealer = !@last_dealer.nil? ? get_next_player(@last_dealer) : @cur_player
-        @cur_player = get_next_player(@last_dealer)
+        @latest_dealer = !@latest_dealer.nil? ? get_next_player(@latest_dealer) : @cur_player
+        @cur_player = get_next_player(@latest_dealer)
       else
         logger.error("Unknown dealer change type: #{change_hash['change']}")
       end

@@ -3,35 +3,20 @@
     "name": "Sample Hearts",
     "deck": {
       "cards": {
-        "trump": [
-          "hearts_ace",
-          "hearts_king",
-          "hearts_queen",
-          "hearts_jack",
-          "hearts_10",
-          "hearts_9",
-          "hearts_8",
-          "hearts_7",
-          "hearts_6",
-          "hearts_5",
-          "hearts_4",
-          "hearts_3",
-          "hearts_2"
-        ],
         "fail": [
-          ["spades_ace", "clubs_ace", "diamonds_ace"],
-          ["spades_king", "clubs_king", "diamonds_king"],
-          ["spades_queen", "clubs_queen", "diamonds_queen"],
-          ["spades_jack", "clubs_jack", "diamonds_jack"],
-          ["spades_10", "clubs_10", "diamonds_10"],
-          ["spades_9", "clubs_9", "diamonds_9"],
-          ["spades_8", "clubs_8", "diamonds_8"],
-          ["spades_7", "clubs_7", "diamonds_7"],
-          ["spades_6", "clubs_6", "diamonds_6"],
-          ["spades_5", "clubs_5", "diamonds_5"],
-          ["spades_4", "clubs_4", "diamonds_4"],
-          ["spades_3", "clubs_3", "diamonds_3"],
-          ["spades_2", "clubs_2", "diamonds_2"]
+          ["hearts_ace", "spades_ace", "clubs_ace", "diamonds_ace"],
+          ["hearts_king", "spades_king", "clubs_king", "diamonds_king"],
+          ["hearts_queen", "spades_queen", "clubs_queen", "diamonds_queen"],
+          ["hearts_jack", "spades_jack", "clubs_jack", "diamonds_jack"],
+          ["hearts_10", "spades_10", "clubs_10", "diamonds_10"],
+          ["hearts_9", "spades_9", "clubs_9", "diamonds_9"],
+          ["hearts_8", "spades_8", "clubs_8", "diamonds_8"],
+          ["hearts_7", "spades_7", "clubs_7", "diamonds_7"],
+          ["hearts_6", "spades_6", "clubs_6", "diamonds_6"],
+          ["hearts_5", "spades_5", "clubs_5", "diamonds_5"],
+          ["hearts_4", "spades_4", "clubs_4", "diamonds_4"],
+          ["hearts_3", "spades_3", "clubs_3", "diamonds_3"],
+          ["hearts_2", "spades_2", "clubs_2", "diamonds_2"]
         ]
       },
       "visible": false
@@ -44,7 +29,44 @@
       "E",
       "S",
       "W"
-    ]
+    ],
+    "scoring": {
+      "method_1": {
+        "card_scores": {
+          "hearts_ace": 1,
+          "hearts_king": 1,
+          "hearts_queen": 1,
+          "hearts_jack": 1,
+          "hearts_10": 1,
+          "hearts_9": 1,
+          "hearts_8": 1,
+          "hearts_7": 1,
+          "hearts_6": 1,
+          "hearts_5": 1,
+          "hearts_4": 1,
+          "hearts_3": 1,
+          "hearts_2": 1,
+          "spades_queen": 13
+        },
+        "transform_1": {
+          "condition": {
+            "subject": "hand_score",
+            "comparison": 26,
+            "comparators": ["equal"]
+          },
+          "transformation": {
+            "current_player": {
+              "action": "set",
+              "value": 0
+            },
+            "other_players": {
+              "action": "add",
+              "value": 26
+            }
+          }
+        }
+      }
+    }
   },
   "step_1": {
     "action": "setup",
@@ -99,7 +121,8 @@
   },
   "step_6": {
     "action": "score",
-    "mechanism": 1
+    "subject": "won_cards",
+    "method": 1
   },
   "step_7": {
     "action": "repeat_until",
