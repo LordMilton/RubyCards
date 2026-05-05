@@ -51,7 +51,7 @@
         "transform_1": {
           "condition": {
             "subject": "hand_score",
-            "comparison": 26,
+            "comparison": 2,
             "comparators": ["equal"]
           },
           "transformation": {
@@ -71,13 +71,19 @@
   "step_1": {
     "action": "setup",
     "change_1": {
-      "action": "reset_hand"
+      "action": "reset",
+      "subject": "hand"
     },
     "change_2": {
-      "action": "shuffle_deck"
+      "action": "reset",
+      "subject": "won_cards"
     },
     "change_3": {
-      "action": "draw"
+      "action": "shuffle_deck"
+    },
+    "change_4": {
+      "action": "draw",
+      "amount": 2
     }
   },
   "step_2": {

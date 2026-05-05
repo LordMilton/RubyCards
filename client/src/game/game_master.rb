@@ -3,6 +3,7 @@ require_relative '../logger'
 require_relative './button'
 require_relative '../cards/hand'
 require_relative './locator'
+require_relative './scoreboard'
 require_relative './window'
 
 LOCATION = {
@@ -58,6 +59,9 @@ class GameMaster
     @won_cards = {}
     @connected_players = []
     @player_names_drawers = {}
+    @player_scores = {}
+    @scoreboard = Scoreboard.new(DEFAULT_NAMES)
+    @scoreboard.update_location(@locator.scoreboard_location)
 
     @cur_actionables = {}
 
@@ -202,6 +206,21 @@ class GameMaster
     nil
   end
 
+  def add_score(hash_dir, score = 0)
+    @player_scores[hash_dir] ||= score
+    @scoreboard.update_scores(@player_scores)
+  end
+
+  def add_to_score(hash_dir, score_to_add)
+    @player_scores[hash_dir] += score_to_add
+    @scoreboard.update_scores(@player_scores)
+  end
+
+  def set_score(hash_dir, score)
+    @player_scores[hash_dir] = score
+    @scoreboard.update_scores(@player_scores)
+  end
+
   def add_actionable(actionable, count)
     logger.debug("Adding potential actionable: #{actionable}")
     @cur_actionables[actionable] = count
@@ -251,6 +270,7 @@ class GameMaster
       create_player_hand(player_dir)
       create_play_area(player_dir)
       create_won_cards(player_dir)
+      add_score(player_dir)
     else
       logger.debug('Ignoring duplicate player connected')
     end
@@ -268,10 +288,7 @@ class GameMaster
       # puts('drawing hand')
       hand.draw(mouse_x, mouse_y)
     end
-    @player_names_drawers.each_value do |draw_fun|
-      # puts('drawing name')
-      draw_fun.call
-    end
+    @player_names_drawers.each_value(&:call)
     if @play_areas_visible
       @play_areas.each_value do |play_area|
         # puts('drawing play area')
@@ -284,6 +301,7 @@ class GameMaster
         won_cards.draw(mouse_x, mouse_y)
       end
     end
+    @scoreboard.draw
     if !@deck.nil? && @deck_visible
       # puts('drawing deck')
       @deck.draw(mouse_x, mouse_y)

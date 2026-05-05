@@ -1,4 +1,4 @@
-# First line for rubocop disables # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
+# First line for rubocop disables # rubocop:disable Style/FrozenStringLiteralComment,Layout/EndOfLine
 
 # Calculates and provides location information for all visuals
 class Locator
@@ -26,6 +26,10 @@ class Locator
   BUTTON_WIDTH = 150.0
   BUTTON_HEIGHT_BUFFER = 10.0
   BUTTON_WIDTH_BUFFER = 10.0
+
+  SCOREBOARD_HEIGHT = PLAYER_HAND_HEIGHT
+  SCOREBOARD_WIDTH = 150
+  SCOREBOARD_WIDTH_BUFFER = BUTTON_WIDTH_BUFFER
 
   def initialize(screen_dimensions = BASE_SCREEN_SIZE)
     calculate_internal_dimensions(screen_dimensions)
@@ -148,6 +152,12 @@ class Locator
     @bottom_won_cards_bottom = screen_height - Y_EDGE_BUFFER
     @bottom_won_cards_top = @bottom_won_cards_bottom - @won_cards_height
 
+    # Scoreboard dimensions
+    @scoreboard_top = @bottom_hand_top
+    @scoreboard_bottom = @scoreboard_top + SCOREBOARD_HEIGHT
+    @scoreboard_right = @x_centered_hands_left - SCOREBOARD_WIDTH_BUFFER
+    @scoreboard_left = @scoreboard_right - SCOREBOARD_WIDTH
+
     # Deck dimensions
     @deck_left = 700 * @x_ratio
     @deck_right = @deck_left + @actual_deck_width
@@ -181,7 +191,8 @@ class Locator
   def play_area_locations(players)
     play_area_locations = [
       [@x_centered_play_area_left, @bottom_play_area_top,     @x_centered_play_area_right, @bottom_play_area_bottom],
-      [@left_play_area_left,       @y_centered_play_area_top, @left_play_area_right,       @y_centered_play_area_bottom],
+      [@left_play_area_left,       @y_centered_play_area_top, @left_play_area_right,
+       @y_centered_play_area_bottom],
       [@x_centered_play_area_left, @top_play_area_top,        @x_centered_play_area_right, @top_play_area_bottom],
       [@right_play_area_left,      @y_centered_play_area_top, @right_play_area_right,      @y_centered_play_area_bottom]
     ]
@@ -227,6 +238,10 @@ class Locator
     end
 
     buttons
+  end
+
+  def scoreboard_location
+    [@scoreboard_left, @scoreboard_top, @scoreboard_right, @scoreboard_bottom]
   end
 
   # @param dir_names_hash:Player names hashed by their direction. Order should be bottom player first moving clockwise

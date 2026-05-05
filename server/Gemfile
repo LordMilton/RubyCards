@@ -6,4 +6,4 @@ gem 'concurrent-ruby'
 gem 'websocket-eventmachine-server'
 
 gem 'rubocop', require: false
-gem 'ruby-lsp'
+gem 'ruby-lsp', require: false

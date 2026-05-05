@@ -53,6 +53,12 @@ class Card
 
   def draw(_mouse_x, _mouse_y)
     card_image = image
+
+    if card_image.nil?
+      logger.error("Card #{self} tried to draw with a null image")
+      return
+    end
+
     if !card_image.nil?
       if @selected
         draw_rectangle(
@@ -83,6 +89,10 @@ class Card
     end
 
     nil
+  end
+
+  def to_s_pretty
+    "#{@value.capitalize} of #{@suit.capitalize}"
   end
 
   private

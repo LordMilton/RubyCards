@@ -178,7 +178,6 @@ class Hand
       return unless @hover_text_image.nil? || @hover_text != new_hover_text
 
       @hover_text = new_hover_text
-      logger.debug("Set hover text to be \"#{@hover_text}\"")
       @hover_text_image = nil
     end
   end

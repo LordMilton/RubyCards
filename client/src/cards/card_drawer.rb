@@ -38,7 +38,7 @@ class CardDrawer
   end
 
   def card_hover_text(card, text_height)
-    name = card.hidden? ? nil : "#{card.value} of #{card.suit}"
+    name = card.hidden? ? nil : card.to_s_pretty
     return Gosu::Image.from_text(name, text_height) unless name.nil?
 
     nil

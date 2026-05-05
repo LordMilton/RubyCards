@@ -20,4 +20,8 @@ class Card
   def hash
     [@suit, @value].hash
   end
+
+  def to_s
+    "#{@suit}_#{@value}"
+  end
 end

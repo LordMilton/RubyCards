@@ -25,7 +25,8 @@ class MessageBuilder
     build_action_message(msg)
   end
 
-  # Builds messages that indicate to the client that there is something they need to do (play and/or draw and/or discard a card)
+  # Builds messages that indicate to the client that there is something they need to do
+  # e.g. play and/or draw and/or discard a card
   # These should only go to the relevant player
   def self.build_actionable_message(actionable)
     msg_hash = { "type": 'actionable' }

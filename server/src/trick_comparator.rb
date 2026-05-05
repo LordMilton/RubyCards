@@ -46,7 +46,7 @@ class TrickComparator
 
   def score_card(card, led_suit)
     score = 0
-    if @trump_cards.include?(card)
+    if @trump_cards&.include?(card)
       score += @trump_min_score
       score += (@trump_cards.size - @trump_cards.index(card))
     else

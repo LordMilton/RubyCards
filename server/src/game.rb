@@ -39,7 +39,7 @@ class Game
     @players_ready = {}
     @players = {}
     @players_count = 0
-    @players_scores = {}
+    @player_scores = {}
     @hands = {}
     @play_areas = {}
     @won_cards = {}
@@ -175,7 +175,7 @@ class Game
         init_instructions['players'].each do |player|
           @players_ready[player] = false
           @players[player] = nil
-          @players_scores[player] = 0
+          @player_scores[player] = 0
           @hands[player] = []
           @play_areas[player] = []
           @won_cards[player] = []
@@ -322,11 +322,11 @@ class Game
     case msg['subject']
     when 'deck'
       index_to_draw = @deck.size - 1
-      drawn_card = removeCard(index_to_draw, 'deck')
+      drawn_card = remove_card(index_to_draw, 'deck')
       add_card(drawn_card, 'hand', player)
     when 'discard'
       index_to_draw = @discard.size - 1
-      drawn_card = removeCard(index_to_draw, 'discard')
+      drawn_card = remove_card(index_to_draw, 'discard')
       add_card(drawn_card, 'hand', player)
     end
 
@@ -340,7 +340,7 @@ class Game
     indices_to_play = msg['index'].sort { |a, b| b <=> a }
 
     indices_to_play.each do |i|
-      played_card = removeCard(i, 'hand', player)
+      played_card = remove_card(i, 'hand', dir: player)
       @recently_played.append([player, played_card])
       add_card(played_card, 'play_area', player)
     end
@@ -355,7 +355,7 @@ class Game
     indices_to_discard = msg['index'].sort { |a, b| b <=> a }
 
     indices_to_discard.each do |i|
-      discarded_card = removeCard(i, 'hand', player)
+      discarded_card = remove_card(i, 'hand', dir: player)
       add_card(discarded_card, 'discard')
     end
 
@@ -445,7 +445,7 @@ class Game
     end
   end
 
-  def removeCard(index, subject, dir = nil)
+  def remove_card(index, subject, dir: nil, return_to_deck: false)
     removed_card = nil
 
     case subject
@@ -473,6 +473,10 @@ class Game
     else
       logger.warn("Tried to remove card from unknown subject #{subject}")
     end
+
+    return if removed_card.nil?
+
+    add_card(removed_card, 'deck') if return_to_deck
 
     removed_card
   end
@@ -617,9 +621,16 @@ class Game
         changes_remaining = false
       else
         case cur_change['action']
-        when 'reset_hand'
-          @hands.each do |dir, hand|
-            removeCard(0, 'hand', dir) until hand.empty?
+        when 'reset'
+          case cur_change['subject']
+          when 'hand'
+            @hands.each do |dir, hand|
+              remove_card(0, 'hand', dir: dir) until hand.empty?
+            end
+          when 'won_cards'
+            @won_cards.each do |dir, hand|
+              remove_card(0, 'won_cards', dir: dir) until hand.empty?
+            end
           end
         when 'shuffle_deck'
           shuffle_deck
@@ -628,7 +639,7 @@ class Game
           num_to_draw = @deck.size / @players.size if num_to_draw.nil?
           while num_to_draw.positive?
             @hands.each_key do |hand|
-              drawn_card = removeCard(0, 'deck')
+              drawn_card = remove_card(0, 'deck')
               add_card(drawn_card, 'hand', hand)
             end
             num_to_draw -= 1
@@ -684,7 +695,7 @@ class Game
     winning_index = @trick_comparator.get_best_card_index(last_trick)
     @latest_winner = @recently_played[winning_index][0]
     @play_areas.each do |player, play_area|
-      removeCard(0, 'play_area', player) until play_area.empty?
+      remove_card(0, 'play_area', dir: player) until play_area.empty?
     end
     last_trick.each do |card|
       add_card(card, 'won_cards', @latest_winner)
@@ -697,8 +708,8 @@ class Game
   def run_step_score(step_hash)
     scoring_method_prefix = 'method_'
 
+    scores = {}
     @hands_rw_lock.with_read_lock do
-      scores = {}
       @players.each_key do |key|
         scores[key] = 0
       end
@@ -716,7 +727,7 @@ class Game
 
       transform_prefix = 'transform_'
       scoring_method = @scoring_instructions["#{scoring_method_prefix}#{step_hash['method']}"]
-      players.each_key do |dir|
+      @players.each_key do |dir|
         scores[dir] = score_cards(cards_to_score[dir], scoring_method['card_scores'])
       end
 
@@ -730,8 +741,16 @@ class Game
       end
     end
 
-    @latest_scores.each do |dir, score|
-      @latest_scores[dir] = score + scores[dir]
+    @hands_rw_lock.with_write_lock do
+      scores.each do |dir, score|
+        @player_scores[dir] = score + @player_scores[dir]
+
+        score_msg = { 'type' => 'change_score',
+                      'subject' => dir,
+                      'effect' => 'add',
+                      'value' => score }
+        add_outgoing_message(MessageBuilder.build_action_message(score_msg))
+      end
     end
     @cur_step += 1
   end
@@ -742,7 +761,7 @@ class Game
   end
 
   def score_cards(cards, scoring_method)
-    scored = cards.map { |card| scoring_method[card] || 0 }
+    scored = cards.map { |card| scoring_method[card.to_s] || 0 }
     scored.sum
   end
 
@@ -785,17 +804,17 @@ class Game
 
       other_players_change = transformation['other_players']
       other_players_keys = scores.keys.reject { |override_dir| override_dir == dir }
-      unless other_players_change.nil?
-        value = other_players_change['value']
-        case other_players_change['action']
-        when 'set'
-          other_players_keys.each do |override_dir|
-            score_overrides[override_dir] = value
-          end
-        when 'add'
-          other_players_keys.each do |override_dir|
-            score_additions[override_dir] = (score_additions[override_dir] || 0) + value
-          end
+      next if other_players_change.nil?
+
+      value = other_players_change['value']
+      case other_players_change['action']
+      when 'set'
+        other_players_keys.each do |override_dir|
+          score_overrides[override_dir] = value
+        end
+      when 'add'
+        other_players_keys.each do |override_dir|
+          score_additions[override_dir] = (score_additions[override_dir] || 0) + value
         end
       end
     end
@@ -828,9 +847,9 @@ class Game
       end
     when 'score'
       if subject_is_current_player
-        compare_values(@players_scores[@cur_player], comparison, comparators)
+        compare_values(@player_scores[@cur_player], comparison, comparators)
       else
-        @players_scores.values.any? { |score| compare_values(score, comparison, comparators) }
+        @player_scores.values.any? { |score| compare_values(score, comparison, comparators) }
       end
     else
       logger.error("Unknown repeat condition type: #{condition['type']}")
