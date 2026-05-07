@@ -1,6 +1,6 @@
-require 'gosu' # rubocop:disable Style/FrozenStringLiteralComment
+require 'em-websocket-client' # rubocop:disable Style/FrozenStringLiteralComment
+require 'gosu'
 require 'json'
-require 'websocket-eventmachine-client'
 require_relative '../cards/card_drawer'
 require_relative '../game/game_master'
 require_relative '../logger'
@@ -20,9 +20,9 @@ class Client
 
   def run
     EM.run do
-      @websocket = WebSocket::EventMachine::Client.connect(uri: 'ws://localhost:25252')
+      @websocket = EventMachine::WebSocketClient.connect('ws://localhost:25252')
 
-      @websocket.onopen do
+      @websocket.callback do
         @websocket_mtx.synchronize do
           logger.info('Connected to server')
           @card_drawer = CardDrawer.new('../../resources/cards/')
@@ -34,13 +34,13 @@ class Client
           end
 
           msg_hash = { "action": 'request_place' }
-          @websocket.send(JSON.generate(msg_hash))
+          @websocket.send_msg(JSON.generate(msg_hash))
         end
       end
 
-      @websocket.onmessage do |msg_json, _|
+      @websocket.stream do |frame|
         @websocket_mtx.synchronize do
-          msg = JSON.parse(msg_json)
+          msg = JSON.parse(frame.to_s)
           logger.debug("Received message: #{msg}")
           case msg['type']
           when 'action'
@@ -99,8 +99,12 @@ class Client
         end
       end
 
-      @websocket.onclose do |code, reason|
-        logger.debug("Disconnected with status code: #{code} for reason: #{reason}")
+      @websocket.errback do |err|
+        logger.error("Received websocket error: #{err}")
+      end
+
+      @websocket.disconnect do
+        logger.debug("Disconnected from server: reason unknown")
         @gosu_thread&.exit
         exit
       end

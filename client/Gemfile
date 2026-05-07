@@ -3,8 +3,8 @@
 source 'https://rubygems.org'
 
 gem 'concurrent-ruby'
+gem 'em-websocket-client'
 gem 'gosu'
-gem 'websocket-eventmachine-client'
 
 gem 'rubocop', require: false
 gem 'ruby-lsp'
