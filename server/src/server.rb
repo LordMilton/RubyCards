@@ -1,11 +1,11 @@
-require 'websocket-eventmachine-server' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
+require 'em-websocket' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
 require_relative './game'
 
 # Game server that handles the separate threads for running the game
 class Server
   def run_event_machine
     EM.run do
-      WebSocket::EventMachine::Server.start(host: '0.0.0.0', port: 25_252) do |ws|
+      EM::WebSocket.run(host: '0.0.0.0', port: 25252) do |ws|
         ws.onopen do
           # TODO: Handle player rejoining mid-game
           # TODO Trigger game chooser for client
