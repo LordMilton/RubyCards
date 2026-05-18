@@ -1,9 +1,9 @@
-require 'em-websocket-client' # rubocop:disable Style/FrozenStringLiteralComment
-require 'gosu'
+require 'gosu' # rubocop:disable Style/FrozenStringLiteralComment,Layout/EndOfLine
 require 'json'
 require_relative '../cards/card_drawer'
 require_relative '../game/game_master'
 require_relative '../logger'
+require_relative './tcp_socket_client'
 
 class Client
   include MyLogger
@@ -19,10 +19,10 @@ class Client
   end
 
   def run
-    EM.run do
-      @websocket = EventMachine::WebSocketClient.connect('ws://localhost:25252')
-
-      @websocket.callback do
+    @websocket = TcpWebSocketClient.new(
+      'localhost',
+      25252, # rubocop:disable Style/NumericLiterals
+      on_connect: lambda {
         @websocket_mtx.synchronize do
           logger.info('Connected to server')
           @card_drawer = CardDrawer.new('../../resources/cards/')
@@ -36,82 +36,86 @@ class Client
           msg_hash = { "action": 'request_place' }
           @websocket.send_msg(JSON.generate(msg_hash))
         end
-      end
-
-      @websocket.stream do |frame|
+      },
+      on_message: lambda { |frame|
         @websocket_mtx.synchronize do
-          msg = JSON.parse(frame.to_s)
-          logger.debug("Received message: #{msg}")
-          case msg['type']
-          when 'action'
-            msg = msg['msg']
-            case msg['type']
-            when 'set_player_location'
-              @game_master.set_front_player(msg['location'])
-            when 'player_connected'
-              @game_master.player_connected(msg['location'])
-            when 'player_disconnected'
-              @game_master.player_disconnected(msg['location'])
-            when 'change_score'
-              change_score(msg)
-            when 'add_card'
-              add_card(msg)
-            when 'remove_card'
-              remove_card(msg)
-            else
-              logger.warn("Received action message with unknown type #{msg['type']}")
-            end
-          when 'actionable'
-            @game_master.reset_actionables
-
-            actionables = msg['msg']['actionables']
-            action_prefix = -'action_'
-            cur_action_num = 1
-            cur_action = actionables["#{action_prefix}#{cur_action_num}"]
-            actions_remaining = true
-            while actions_remaining
-              logger.info("Adding potential actionable: #{cur_action}")
-              @game_master.add_actionable(cur_action['action'], cur_action['count'])
-
-              cur_action_num += 1
-              cur_action = actionables["#{action_prefix}#{cur_action_num}"]
-              actions_remaining = !cur_action.nil?
-            end
-          when 'info'
-            msg = msg['msg']
-            case msg['type']
-            when 'set_visibility'
-              visible = msg['visible'] == 'true'
-              case msg['subject']
-              when 'deck'
-                @game_master.deck_visible(visible)
-              when 'discard'
-                @game_master.discard_visible(visible)
-              else
-                logger.warn("Received set_visibility message with unknown subject #{msg['subject']}")
-              end
-            else
-              logger.warn("Received info message with unknown type #{msg['type']}")
-            end
-          else
-            logger.warn("Received message with an unknown type #{msg['type']}")
-          end
+          handle_message(frame)
         end
-      end
-
-      @websocket.errback do |err|
+      },
+      on_error: lambda { |err|
         logger.error("Received websocket error: #{err}")
-      end
-
-      @websocket.disconnect do
-        logger.debug("Disconnected from server: reason unknown")
+      },
+      on_disconnect: lambda {
+        logger.debug('Disconnected from server: reason unknown')
         @gosu_thread&.exit
         exit
-      end
-    end
+      }
+    )
+
+    @websocket.connect
+    @websocket.wait
   end
 
   private
+
+  def handle_message(frame)
+    msg = JSON.parse(frame.to_s)
+    logger.debug("Received message: #{msg}")
+    case msg['type']
+    when 'action'
+      msg = msg['msg']
+      case msg['type']
+      when 'set_player_location'
+        @game_master.set_front_player(msg['location'])
+      when 'player_connected'
+        @game_master.player_connected(msg['location'])
+      when 'player_disconnected'
+        @game_master.player_disconnected(msg['location'])
+      when 'change_score'
+        change_score(msg)
+      when 'add_card'
+        add_card(msg)
+      when 'remove_card'
+        remove_card(msg)
+      else
+        logger.warn("Received action message with unknown type #{msg['type']}")
+      end
+    when 'actionable'
+      @game_master.reset_actionables
+
+      actionables = msg['msg']['actionables']
+      action_prefix = -'action_'
+      cur_action_num = 1
+      cur_action = actionables["#{action_prefix}#{cur_action_num}"]
+      actions_remaining = true
+      while actions_remaining
+        logger.info("Adding potential actionable: #{cur_action}")
+        @game_master.add_actionable(cur_action['action'], cur_action['count'])
+
+        cur_action_num += 1
+        cur_action = actionables["#{action_prefix}#{cur_action_num}"]
+        actions_remaining = !cur_action.nil?
+      end
+    when 'info'
+      msg = msg['msg']
+      case msg['type']
+      when 'set_visibility'
+        visible = msg['visible'] == 'true'
+        case msg['subject']
+        when 'deck'
+          @game_master.deck_visible(visible)
+        when 'discard'
+          @game_master.discard_visible(visible)
+        else
+          logger.warn("Received set_visibility message with unknown subject #{msg['subject']}")
+        end
+      else
+        logger.warn("Received info message with unknown type #{msg['type']}")
+      end
+    else
+      logger.warn("Received message with an unknown type #{msg['type']}")
+    end
+  end
 
   def change_score(msg)
     subject = msg['subject']

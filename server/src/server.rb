@@ -1,20 +1,22 @@
-require 'em-websocket' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
-require_relative './game'
+require_relative './game' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
+require_relative './tcp_client_handler'
 
 # Game server that handles the separate threads for running the game
 class Server
-  def run_event_machine
-    EM.run do
-      EM::WebSocket.run(host: '0.0.0.0', port: 25252) do |ws|
-        ws.onopen do
-          # TODO: Handle player rejoining mid-game
-          # TODO Trigger game chooser for client
-          @game ||= Game.new('Sample_Hearts.json')
-          @game.add_player(ws)
+  def run_tcp_server
+    server = TCPServer.new('0.0.0.0', 25252) # rubocop:disable Style/NumericLiterals
 
-          start_tick_thread(30)
-          start_game_thread
-        end
+    loop do
+      Thread.new(server.accept) do |socket|
+        ws = TcpClientConnection.new(socket)
+
+        @game ||= Game.new('Sample_Hearts.json')
+        @game.add_player(ws)
+
+        start_tick_thread(30)
+        start_game_thread
+
+        ws.listen.join
       end
     end
   end
@@ -41,4 +43,4 @@ class Server
 end
 
 server = Server.new
-server.run_event_machine
+server.run_tcp_server

@@ -3,7 +3,6 @@
 source 'https://rubygems.org'
 
 gem 'concurrent-ruby'
-gem 'em-websocket-client'
 gem 'gosu'
 
 gem 'rubocop', require: false

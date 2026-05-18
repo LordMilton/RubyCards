@@ -1,4 +1,4 @@
-require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment
+require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment,Layout/EndOfLine
 require 'json'
 require_relative './card'
 require_relative './message_builder'
