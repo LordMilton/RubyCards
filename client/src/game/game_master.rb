@@ -407,7 +407,7 @@ class GameMaster
   end
 
   def send_message(msg_hash)
-    @websocket.send(JSON.generate(msg_hash))
+    @websocket.send_msg(JSON.generate(msg_hash))
   end
 end
 

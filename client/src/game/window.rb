@@ -2,8 +2,11 @@ require 'gosu' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComme
 require_relative '../cards/card'
 require_relative '../cards/card_drawer'
 require_relative '../cards/hand'
+require_relative '../logger'
 
 class GameWindow < Gosu::Window
+  include MyLogger
+
   @@LmbId = 256
 
   attr_writer :cardDrawer
@@ -13,8 +16,14 @@ class GameWindow < Gosu::Window
     self.resizable = false
     self.caption = 'Cards'
 
+    @change_caption = false
+    @new_caption = ''
+
     @game_master = game_master
-    @game_master.game_title_callback(proc { |title| self.caption = "RubyCards: #{title}" })
+    @game_master.game_title_callback(proc { |title|
+      @change_caption = true
+      @new_caption = "RubyCards: #{title}"
+    })
 
     @time_now = Time.new
     @time_last = Time.new
@@ -40,6 +49,8 @@ class GameWindow < Gosu::Window
   private :draw_fps
 
   def update
+    self.caption = @new_caption if @change_caption
+
     return unless @first_frame
 
     @game_master.handle_first_frame
