@@ -2,3 +2,8 @@ vendor/
 *.sh
 *.log
 *.code-workspace
+Ruby/
+bin/
+*.exe
+*.dll
+*.DLL

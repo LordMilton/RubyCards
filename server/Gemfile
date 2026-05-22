@@ -4,5 +4,5 @@ source "https://rubygems.org" # rubocop:disable Style/StringLiterals
 
 gem 'concurrent-ruby'
 
-gem 'rubocop', require: false
-gem 'ruby-lsp', require: false
+#gem 'rubocop', require: false
+#gem 'ruby-lsp', require: false
