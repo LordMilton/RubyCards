@@ -1,11 +1,15 @@
 require_relative './game' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
+require_relative './logger'
 require_relative './tcp_client_handler'
 
 # Game server that handles the separate threads for running the game
 class Server
-  def run_tcp_server
-    server = TCPServer.new('0.0.0.0', 25252) # rubocop:disable Style/NumericLiterals
+  include MyLogger
 
+  def run_tcp_server(host = '0.0.0.0', port = 25252) # rubocop:disable Style/NumericLiterals
+    server = TCPServer.new(host, port)
+
+    logger.info "Starting server on #{host}:#{port}"
     loop do
       Thread.new(server.accept) do |socket|
         ws = TcpClientConnection.new(socket)
