@@ -1,4 +1,4 @@
-require 'gosu' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
+require 'gosu' # rubocop:disable Style/FrozenStringLiteralComment
 require_relative 'card'
 require_relative '../logger'
 
@@ -16,12 +16,13 @@ class CardDrawer
   end
 
   def initialize_images
+    logger.debug('Fetching card images')
+
     @card_images = {}
     Dir.each_child(@card_images_dir) do |filename|
       full_filename = "#{@card_images_dir}/#{filename}"
       next unless File.extname(full_filename) == '.jpg'
 
-      logger.debug("Fetching card image #{filename} with full path #{full_filename}")
       card_name = filename.sub(/\..+$/, '')
       @card_images[card_name] = Gosu::Image.new(full_filename)
     end

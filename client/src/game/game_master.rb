@@ -1,10 +1,10 @@
-require 'gosu' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
+require 'gosu' # rubocop:disable Style/FrozenStringLiteralComment
 require_relative '../logger'
-require_relative './button'
 require_relative '../cards/hand'
 require_relative './locator'
 require_relative './scoreboard'
-require_relative './window'
+require_relative '../ui/button'
+require_relative '../ui/window'
 
 LOCATION = {
   'S' => 0,
@@ -282,7 +282,10 @@ class GameMaster
     reposition_hands
   end
 
-  def draw_game(mouse_x, mouse_y)
+  def draw_ui(window)
+    mouse_x = window.mouse_x
+    mouse_y = window.mouse_y
+
     # puts('drawing frame')
     @player_hands.each_value do |hand|
       # puts('drawing hand')
@@ -314,6 +317,12 @@ class GameMaster
       # puts('drawing button')
       btn.draw(mouse_x, mouse_y)
     end
+  end
+
+  def button_down(id, window)
+    return unless id == Gosu::MS_LEFT
+
+    clicked(window.mouse_x, window.mouse_y)
   end
 
   def clicked(mouse_x, mouse_y)

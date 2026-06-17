@@ -1,8 +1,9 @@
-require 'gosu' # rubocop:disable Style/FrozenStringLiteralComment,Layout/EndOfLine
+require 'gosu' # rubocop:disable Style/FrozenStringLiteralComment
 require 'json'
 require_relative '../cards/card_drawer'
 require_relative '../game/game_master'
 require_relative '../logger'
+require_relative './connection_gui'
 require_relative './tcp_socket_client'
 
 class Client
@@ -16,22 +17,30 @@ class Client
     @gosu_thread = nil
 
     @websocket_mtx = Mutex.new
+    @ip = nil
+    @port = nil
   end
 
   def run
+    @connection_gui = ConnectionGui.new(lambda { |ip, port|
+      run_game_window(ip, port)
+    })
+    @game_window = GameWindow.new(@connection_gui)
+    logger.info('Starting connection ui')
+    @game_window.show
+  end
+
+  def run_game_window(ip, port)
     @websocket = TcpWebSocketClient.new(
-      'localhost',
-      25252, # rubocop:disable Style/NumericLiterals
+      ip,
+      port,
       on_connect: lambda {
         @websocket_mtx.synchronize do
           logger.info('Connected to server')
           @card_drawer = CardDrawer.new('../../resources/cards/')
           @game_master = GameMaster.new(@websocket, @card_drawer)
-          @gosu_thread = Thread.new do
-            @game_window = GameWindow.new(@game_master)
-            logger.info('Starting game window')
-            @game_window.show
-          end
+          logger.info('Switching to game window')
+          @game_window.initiate_gui_change(@game_master)
 
           msg_hash = { "action": 'request_place' }
           @websocket.send_msg(JSON.generate(msg_hash))
