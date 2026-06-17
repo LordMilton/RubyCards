@@ -7,11 +7,16 @@ class Server
   include MyLogger
 
   def run_tcp_server(host = '0.0.0.0', port = 25252) # rubocop:disable Style/NumericLiterals
-    server = TCPServer.new(host, port)
+    logger.info "Starting local server on #{port}"
+    begin
+      @server = TCPServer.new(host, port)
+    rescue Errno::EADDRINUSE
+      logger.fatal("Port #{port} is already occupied, cannot start server")
+      return
+    end
 
-    logger.info "Starting server on #{host}:#{port}"
     loop do
-      Thread.new(server.accept) do |socket|
+      Thread.new(@server.accept) do |socket|
         ws = TcpClientConnection.new(socket)
 
         @game ||= Game.new('Sample_Hearts.json')
@@ -46,5 +51,5 @@ class Server
   end
 end
 
-server = Server.new
-server.run_tcp_server
+game_server = Server.new
+game_server.run_tcp_server
