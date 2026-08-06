@@ -706,8 +706,6 @@ class Game
   end
 
   def run_step_score(step_hash)
-    scoring_method_prefix = 'method_'
-
     scores = {}
     @hands_rw_lock.with_read_lock do
       @players.each_key do |key|
@@ -726,9 +724,15 @@ class Game
       end
 
       transform_prefix = 'transform_'
-      scoring_method = @scoring_instructions["#{scoring_method_prefix}#{step_hash['method']}"]
-      @players.each_key do |dir|
-        scores[dir] = score_cards(cards_to_score[dir], scoring_method['card_scores'])
+      scoring_method = @scoring_instructions["#{step_hash['method']}"]
+      if(scoring_method.include?['card_scores'])
+        @players.each_key do |dir|
+          scores[dir] = score_cards(cards_to_score[dir], scoring_method['card_scores'])
+        end
+      elsif(scoring_method.include?['defined_score'])
+        @players.each_key do |dir|
+          scores[dir] = score_cards_special(cards_to_score[dir], scoring_method['defined_score'])
+        end
       end
 
       transform_num = 1
@@ -763,6 +767,95 @@ class Game
   def score_cards(cards, scoring_method)
     scored = cards.map { |card| scoring_method[card.to_s] || 0 }
     scored.sum
+  end
+
+  def score_cards_special(cards, scoring_method)
+    if(scoring_method.include?("x_of_a_kind"))
+      score_cards_x_of_a_kind(cards, scoring_method["x_of_a_kind"])
+    elsif(scoring_method.include?("flush"))
+      score_cards_x_of_a_kind(cards, scoring_method["flush"])
+    elsif(scoring_method.include?("straight"))
+      score_cards_x_of_a_kind(cards, scoring_method["straight"])
+    else
+      logger.warn("Rules contained an unrecognized special scoring method: #{scoring_method}")
+      0
+    end
+  end
+
+  def score_cards_straight(cards, scoring_method)
+    same_suit = scoring_method["same_suit"] || false
+    wrap_allowed = false
+
+    value_order = %w[2 3 4 5 6 7 8 9 10 Jack Queen King Ace] # TODO Ace high or low?
+
+    # Grouping to permit only flush-straights if necessary
+    groups = if same_suit
+      cards.group_by(&:suit).values
+    else
+      [cards]
+    end
+
+    straights = []
+
+    groups.each do |group|
+      sorted = group.sort_by { |card| value_order.index(card.value) || 0 }
+
+      used = Array.new(sorted.length, false)
+
+      sorted.each_with_index do |start_card, i|
+        next if used[i]
+
+        current_straight = [start_card]
+        current_used = [i]
+        expected_index = value_order.index(start_card.value) + 1
+
+        loop do
+          expected_index = expected_index % value_order.length if wrap_allowed
+
+          # Stop if we've wrapped all the way back to the start card
+          break if wrap_allowed && expected_index == value_order.index(start_card.value)
+
+          next_index = sorted.index.with_index do |card, j|
+            !used[j] && !current_used.include?(j) && value_order.index(card.value) == expected_index
+          end
+
+          break unless next_index
+
+          current_straight << sorted[next_index]
+          current_used << next_index
+          expected_index += 1
+        end
+
+        current_used.each { |j| used[j] = true }
+        straights << current_straight
+      end
+    end
+
+    logger.debug("Scoring straights in hand: #{cards}, straights: #{straights} ")
+
+    scored = 0
+    straights.each { |straight|
+      size = straight.size
+      scored += (size * scoringMethod["score_per_card"]) if size >= scoringMethod["min_size"].to_i
+    }
+  end
+
+  def score_cards_flush(cards, scoring_method)
+    sets = []
+    cards.each { |card| sets[card.suit] = (sets[card.suit] || 0) + 1 }
+    scored = 0
+    sets.each { |setSize|
+      scored += (setSize * scoringMethod["score_per_card"]) if setSize >= scoringMethod["min_size"].to_i
+    }
+  end
+
+  def score_cards_x_of_a_kind(cards, scoring_method)
+    sets = []
+    cards.each { |card| sets[card.value] = (sets[card.value] || 0) + 1 }
+    scored = 0
+    sets.each { |setSize|
+      scored += (scoring_method[setSize.to_s] || 0)
+    }
   end
 
   def transform_scores(transform_instructions, scores)
