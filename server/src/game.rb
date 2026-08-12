@@ -604,6 +604,8 @@ class Game
       run_step_actionable(step_hash)
     when 'repeat_until'
       run_step_repeat(step_hash)
+    when 'goto'
+      run_step_goto(step_hash)
     when 'assign_trick'
       run_step_assign_trick(step_hash)
     when 'score'
