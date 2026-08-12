@@ -660,7 +660,12 @@ class Game
   def run_step_repeat(step_hash)
     condition_met = check_conditional(step_hash['condition'])
 
-    enact_repeat_change(step_hash['change'])
+    val change_prefix = 'change_'
+    var change_num = 1
+    while(step_hash.include?("#{change_prefix}#{change_num}"))
+      enact_repeat_change(step_hash["#{change_prefix}#{change_num}"])
+      change_num += 1
+    end
 
     if condition_met
       @cur_step += 1
@@ -986,26 +991,28 @@ class Game
   end
 
   def enact_repeat_change(change_hash)
-    case change_hash['subject']
-    when 'player'
-      case change_hash['change']
-      when 'next'
-        @cur_player = get_next_player(@cur_player)
-      when 'last_winner'
-        @cur_player = @latest_winner unless @latest_winner.nil?
+    if(!change_hash.nil?)
+      case change_hash['subject']
+      when 'player'
+        case change_hash['change']
+        when 'next'
+          @cur_player = get_next_player(@cur_player)
+        when 'last_winner'
+          @cur_player = @latest_winner unless @latest_winner.nil?
+        else
+          logger.error("Unknown player change type: #{change_hash['change']}")
+        end
+      when 'dealer'
+        case change_hash['change']
+        when 'next'
+          @latest_dealer = !@latest_dealer.nil? ? get_next_player(@latest_dealer) : @cur_player
+          @cur_player = get_next_player(@latest_dealer)
+        else
+          logger.error("Unknown dealer change type: #{change_hash['change']}")
+        end
       else
-        logger.error("Unknown player change type: #{change_hash['change']}")
+        logger.error("Unknown change subject: #{change_hash['subject']}")
       end
-    when 'dealer'
-      case change_hash['change']
-      when 'next'
-        @latest_dealer = !@latest_dealer.nil? ? get_next_player(@latest_dealer) : @cur_player
-        @cur_player = get_next_player(@latest_dealer)
-      else
-        logger.error("Unknown dealer change type: #{change_hash['change']}")
-      end
-    else
-      logger.error("Unknown change subject: #{change_hash['subject']}")
     end
   end
 end
