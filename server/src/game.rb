@@ -75,6 +75,10 @@ class Game
     @cur_step = 1
     @repeat_incrementers = {}
 
+    # Arbitrary variables created in the ruleset
+    @counter_variables = {}
+    @flag_variables = {}
+
     # Message queues
     # TODO mutex?
     @outgoing_msg_q = []
@@ -654,7 +658,7 @@ class Game
   end
 
   def run_step_repeat(step_hash)
-    condition_met = check_repeat_condition(step_hash)
+    condition_met = check_conditional(step_hash['condition'])
 
     enact_repeat_change(step_hash['change'])
 
@@ -662,6 +666,16 @@ class Game
       @cur_step += 1
     else
       @cur_step = step_hash['from_step']
+    end
+  end
+
+  def run_step_goto(step_hash)
+    condition_met = !step_hash.include?('condition') || check_conditional(step_hash['condition'])
+
+    if condition_met
+      @cur_step = step_hash["from_step"].to_i
+    else
+      @cur_step += 1
     end
   end
 
@@ -919,8 +933,9 @@ class Game
     scores
   end
 
-  def check_repeat_condition(step_hash)
-    condition = step_hash['condition']
+  # @param conditional_hash All of the instructions contained within "condition"
+  # @return True if conditional evaluates to true, False otherwise
+  def check_conditional(conditional_hash)
     comparators = condition['comparators']
     comparison = condition['comparison']
     subject_is_current_player = condition['subject'] == 'cur_player'
@@ -945,8 +960,14 @@ class Game
         @player_scores.values.any? { |score| compare_values(score, comparison, comparators) }
       end
     else
-      logger.error("Unknown repeat condition type: #{condition['type']}")
-      true
+      if(@counter_variables.include?(condition['type']))
+        compare_values(@counter_variables[condition['type']], comparison, comparators)
+      elsif(@flag_variables.include?(condition['type']))
+        @flag_variables[conditions['type']]
+      else
+        logger.error("Unknown repeat condition type: #{condition['type']}")
+        true
+      end
     end
   end
 
