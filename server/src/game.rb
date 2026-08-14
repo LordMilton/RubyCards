@@ -3,6 +3,7 @@ require 'json'
 require_relative './card'
 require_relative './message_builder'
 require_relative './logger'
+require_relative './seat_placements'
 require_relative './trick_comparator'
 
 LOCATION = {
@@ -186,6 +187,7 @@ class Game
           @cur_player = player
           @latest_dealer = get_previous_player(@cur_player)
         end
+        @seat_placements = SeatPlacements(@players)
       end
     end
   end
@@ -606,6 +608,8 @@ class Game
       run_step_repeat(step_hash)
     when 'goto'
       run_step_goto(step_hash)
+    when 'change_variable'
+      run_step_change_variable(step_hash)
     when 'assign_trick'
       run_step_assign_trick(step_hash)
     when 'score'
@@ -664,8 +668,8 @@ class Game
 
     val change_prefix = 'change_'
     var change_num = 1
-    while(step_hash.include?("#{change_prefix}#{change_num}"))
-      enact_repeat_change(step_hash["#{change_prefix}#{change_num}"])
+    while step_hash.include?("#{change_prefix}#{change_num}")
+      enact_variable_change(step_hash["#{change_prefix}#{change_num}"])
       change_num += 1
     end
 
@@ -680,10 +684,18 @@ class Game
     condition_met = !step_hash.include?('condition') || check_conditional(step_hash['condition'])
 
     if condition_met
-      @cur_step = step_hash["from_step"].to_i
+      @cur_step = step_hash['from_step'].to_i
     else
       @cur_step += 1
     end
+  end
+
+  def run_step_change_variable(step_hash)
+    val condition_met = check_conditional(step_hash('condition'))
+
+    return unless condition_met
+
+    enact_variable_change(step_hash["change"])
   end
 
   def run_step_actionable(step_hash)
@@ -746,11 +758,11 @@ class Game
 
       transform_prefix = 'transform_'
       scoring_method = @scoring_instructions["#{step_hash['method']}"]
-      if(scoring_method.include?['card_scores'])
+      if scoring_method.include?['card_scores']
         @players.each_key do |dir|
           scores[dir] = score_cards(cards_to_score[dir], scoring_method['card_scores'])
         end
-      elsif(scoring_method.include?['defined_score'])
+      elsif scoring_method.include?['defined_score']
         @players.each_key do |dir|
           scores[dir] = score_cards_special(cards_to_score[dir], scoring_method['defined_score'])
         end
@@ -791,11 +803,11 @@ class Game
   end
 
   def score_cards_special(cards, scoring_method)
-    if(scoring_method.include?("x_of_a_kind"))
+    if scoring_method.include?('x_of_a_kind')
       score_cards_x_of_a_kind(cards, scoring_method["x_of_a_kind"])
-    elsif(scoring_method.include?("flush"))
+    elsif scoring_method.include?('flush')
       score_cards_x_of_a_kind(cards, scoring_method["flush"])
-    elsif(scoring_method.include?("straight"))
+    elsif scoring_method.include?('straight')
       score_cards_x_of_a_kind(cards, scoring_method["straight"])
     else
       logger.warn("Rules contained an unrecognized special scoring method: #{scoring_method}")
@@ -804,17 +816,18 @@ class Game
   end
 
   def score_cards_straight(cards, scoring_method)
-    same_suit = scoring_method["same_suit"] || false
+    same_suit = scoring_method['same_suit'] || false
     wrap_allowed = false
 
     value_order = %w[2 3 4 5 6 7 8 9 10 Jack Queen King Ace] # TODO Ace high or low?
 
     # Grouping to permit only flush-straights if necessary
-    groups = if same_suit
-      cards.group_by(&:suit).values
-    else
-      [cards]
-    end
+    groups =
+      if same_suit
+        cards.group_by(&:suit).values
+      else
+        [cards]
+      end
 
     straights = []
 
@@ -831,7 +844,7 @@ class Game
         expected_index = value_order.index(start_card.value) + 1
 
         loop do
-          expected_index = expected_index % value_order.length if wrap_allowed
+          expected_index %= value_order.length if wrap_allowed
 
           # Stop if we've wrapped all the way back to the start card
           break if wrap_allowed && expected_index == value_order.index(start_card.value)
@@ -865,8 +878,8 @@ class Game
     sets = []
     cards.each { |card| sets[card.suit] = (sets[card.suit] || 0) + 1 }
     scored = 0
-    sets.each { |setSize|
-      scored += (setSize * scoringMethod["score_per_card"]) if setSize >= scoringMethod["min_size"].to_i
+    sets.each { |set_size|
+      scored += (set_size * scoring_method['score_per_card']) if set_size >= scoring_method["min_size"].to_i
     }
   end
 
@@ -874,8 +887,8 @@ class Game
     sets = []
     cards.each { |card| sets[card.value] = (sets[card.value] || 0) + 1 }
     scored = 0
-    sets.each { |setSize|
-      scored += (scoring_method[setSize.to_s] || 0)
+    sets.each { |set_size|
+      scored += (scoring_method[set_size.to_s] || 0)
     }
   end
 
@@ -943,11 +956,11 @@ class Game
   # @param conditional_hash All of the instructions contained within "condition"
   # @return True if conditional evaluates to true, False otherwise
   def check_conditional(conditional_hash)
-    comparators = condition['comparators']
-    comparison = condition['comparison']
-    subject_is_current_player = condition['subject'] == 'cur_player'
+    comparators = conditional_hash['comparators']
+    comparison = conditional_hash['comparison']
+    subject_is_current_player = conditional_hash['subject'] == 'cur_player'
 
-    case condition['type']
+    case conditional_hash['type']
     when 'occurrences'
       @repeat_incrementers[@cur_step] += 1
       current = @repeat_incrementers[@cur_step]
@@ -967,12 +980,12 @@ class Game
         @player_scores.values.any? { |score| compare_values(score, comparison, comparators) }
       end
     else
-      if(@counter_variables.include?(condition['type']))
+      if @counter_variables.include?(conditional_hash['type'])
         compare_values(@counter_variables[condition['type']], comparison, comparators)
-      elsif(@flag_variables.include?(condition['type']))
-        @flag_variables[conditions['type']]
+      elsif @flag_variables.include?(conditional_hash['type'])
+        @flag_variables[conditional_hash['type']]
       else
-        logger.error("Unknown repeat condition type: #{condition['type']}")
+        logger.error("Unknown repeat condition type: #{conditional_hash['type']}")
         true
       end
     end
@@ -992,29 +1005,73 @@ class Game
     end
   end
 
-  def enact_repeat_change(change_hash)
-    if(!change_hash.nil?)
-      case change_hash['subject']
-      when 'player'
-        case change_hash['change']
-        when 'next'
-          @cur_player = get_next_player(@cur_player)
-        when 'last_winner'
-          @cur_player = @latest_winner unless @latest_winner.nil?
+  def enact_variable_change(change_hash)
+    return if change_hash.nil?
+
+    case change_hash['subject']
+    when 'player'
+      change_cur_player(change_hash)
+    when 'dealer'
+      change_dealer(change_hash)
+    else
+      if counter_variables.include?(var_name_to_change)
+        val value_change = change_hash['value']
+        case change_hash['action']
+        when 'set'
+          counter_variables[var_name_to_change] = value_change
+        when 'add'
+          counter_variables[var_name_to_change] = counter_variables[var_name_to_change] + value_change
         else
-          logger.error("Unknown player change type: #{change_hash['change']}")
+          logger.error("Unknown counter variable change type: #{change_hash['action']}")
         end
-      when 'dealer'
-        case change_hash['change']
-        when 'next'
-          @latest_dealer = !@latest_dealer.nil? ? get_next_player(@latest_dealer) : @cur_player
-          @cur_player = get_next_player(@latest_dealer)
+      elsif flag_variables.include?(var_name_to_change)
+        val value_change = change_hash['value']
+        case change_hash['action']
+        when 'set'
+          flag_variables[var_name_to_change] = value_change
+        when 'flip'
+          flag_variables[var_name_to_change] = !flag_variables[var_name_to_change]
         else
-          logger.error("Unknown dealer change type: #{change_hash['change']}")
+          logger.error("Unknown flag variable change type: #{change_hash['action']}")
         end
       else
-        logger.error("Unknown change subject: #{change_hash['subject']}")
+        logger.error("Unknown variable to change: #{var_name_to_change}")
+        true
       end
+    end
+  end
+
+  def change_cur_player(change_hash)
+    case change_hash['change']
+    when 'next'
+      @cur_player = get_next_player(@cur_player)
+    when 'last_winner'
+      @cur_player = @latest_winner unless @latest_winner.nil?
+    else
+      logger.error("Unknown player change type: #{change_hash['change']}")
+    end
+  end
+
+  def change_dealer(change_hash)
+    case change_hash['change']
+    when 'next'
+      @latest_dealer = !@latest_dealer.nil? ? get_next_player(@latest_dealer) : @cur_player
+      @cur_player = get_next_player(@latest_dealer)
+    else
+      logger.error("Unknown dealer change type: #{change_hash['change']}")
+    end
+  end
+
+  def calculate_player(relative_player, change)
+    case change
+    when 'next'
+      @seat_placements.next(relative_player)
+    when 'last'
+      @seat_placements.last(relative_player)
+    when 'dealer'
+      @dealer
+    when 'left_of_dealer'
+      @seat_placements.next(@dealer)
     end
   end
 end
