@@ -53,6 +53,13 @@ class Game
     @deck = []
     @discard = []
 
+    # Extra hands can be made visible and hold actual, non-duplicated cards
+    @extra_hands = {}
+    # Fake hands will not be visible, and the cards in them are duplicated (when the deck is shuffled, these cards don't matter)
+    # They are good for scoring when you need to score combinations of other hands but need to keep those hands separate
+    #    for future scoring and such
+    @fake_hands = {}
+
     # Data locks
     @players_rw_lock = Concurrent::ReadWriteLock.new
     @hands_rw_lock = Concurrent::ReadWriteLock.new
@@ -67,6 +74,7 @@ class Game
     @latest_bids = {}
     @cur_player = nil
     @latest_dealer = nil
+    @latest_actionable = nil
 
     # Variables for waiting on and handling client actions ("actionables")
     @actionable_latch = nil
@@ -110,6 +118,13 @@ class Game
       indicate_deck
 
       set_starting_discard(@instructions['game']['discard'])
+
+      @instructions['extra_hands'].each do |extra_hand|
+        @extra_hands[extra_hand] = []
+      end
+      @instructions['fake_hands'].each do |fake_hand|
+        @fake_hands[fake_hand] = []
+      end
 
       until game_complete
         if @cur_step <= @final_instruction_step
@@ -323,7 +338,12 @@ class Game
   end
 
   def handle_draw_message(msg, player)
-    @cur_actionables['draw'] = @cur_actionables['draw'] - 1
+    val actionable_name = 'draw'
+
+    return if @cur_actionables[actionable_name].nil? || @cur_actionables[actionable_name] <= 0
+
+    @last_actionable = actionable_name
+    @cur_actionables[actionable_name] = @cur_actionables[actionable_name] - 1
 
     case msg['subject']
     when 'deck'
@@ -336,13 +356,18 @@ class Game
       add_card(drawn_card, 'hand', player)
     end
 
-    return unless @cur_actionables['draw'] == 0
+    return unless @cur_actionables[actionable_name].zero?
 
     @actionable_latch.count_down
   end
 
   def handle_play_message(msg, player)
-    @cur_actionables['play'] = @cur_actionables['play'] - msg['index'].size
+    val actionable_name = 'play'
+
+    return if @cur_actionables[actionable_name].nil? || @cur_actionables[actionable_name] <= 0
+
+    @last_actionable = actionable_name
+    @cur_actionables[actionable_name] = @cur_actionables[actionable_name] - msg['index'].size
     indices_to_play = msg['index'].sort { |a, b| b <=> a }
 
     indices_to_play.each do |i|
@@ -351,28 +376,33 @@ class Game
       add_card(played_card, 'play_area', player)
     end
 
-    return unless @cur_actionables['play'].zero?
+    return unless @cur_actionables[actionable_name].zero?
 
     @actionable_latch.count_down
   end
 
   def handle_discard_message(msg, player)
-    @cur_actionables['discard'] = @cur_actionables['discard'] - msg['index'].size
+    val actionable_name = 'discard'
+
+    return if @cur_actionables[actionable_name].nil? || @cur_actionables[actionable_name] <= 0
+
+    @last_actionable = actionable_name
+    @cur_actionables[actionable_name] = @cur_actionables[actionable_name] - msg['index'].size
     indices_to_discard = msg['index'].sort { |a, b| b <=> a }
 
     indices_to_discard.each do |i|
       discarded_card = remove_card(i, 'hand', dir: player)
-      add_card(discarded_card, 'discard')
+      add_card(discarded_card, actionable_name)
     end
 
-    return unless @cur_actionables['discard'].zero?
+    return unless @cur_actionables[actionable_name].zero?
 
     @actionable_latch.count_down
   end
 
   def parse_card_list(card_list)
     flat_parsed_cards = parse_cards_flat(card_list)
-    hierarchical_parsed_cards = parseCardsHierarchical(card_list)
+    hierarchical_parsed_cards = parse_cards_hierarchical(card_list)
     { 'flat' => flat_parsed_cards, 'hier' => hierarchical_parsed_cards }
   end
 
@@ -383,10 +413,10 @@ class Game
     end
   end
 
-  def parseCardsHierarchical(list)
+  def parse_cards_hierarchical(list)
     list.map do |element|
       if element.is_a?(Array)
-        parseCardsHierarchical(element)
+        parse_cards_hierarchical(element)
       else
         suit, value = element.split('_')
         Card.new(suit, value)
@@ -572,17 +602,6 @@ class Game
     end
   end
 
-  def get_next_player(location)
-    next_player = location
-    viable_player = false
-    until viable_player
-      next_player = num_to_direction_hash(LOCATION[next_player] + 1)
-      viable_player = true if @players.key?(next_player)
-    end
-
-    next_player
-  end
-
   def get_previous_player(location)
     last_player = location
     viable_player = false
@@ -644,7 +663,7 @@ class Game
           end
         when 'shuffle_deck'
           shuffle_deck
-        when 'draw'
+        when 'deal'
           num_to_draw = cur_change['amount']
           num_to_draw = @deck.size / @players.size if num_to_draw.nil?
           while num_to_draw.positive?
@@ -695,7 +714,7 @@ class Game
 
     return unless condition_met
 
-    enact_variable_change(step_hash["change"])
+    enact_variable_change(step_hash['change'])
   end
 
   def run_step_actionable(step_hash)
@@ -739,56 +758,84 @@ class Game
   end
 
   def run_step_score(step_hash)
-    scores = {}
-    @hands_rw_lock.with_read_lock do
-      @players.each_key do |key|
-        scores[key] = 0
-      end
-
-      cards_to_score = {}
-      subject = step_hash['subject']
-      case subject
-      when 'play_area'
-        cards_to_score = @play_areas
-      when 'won_cards'
-        cards_to_score = @won_cards
-      when 'hand'
-        cards_to_score = @hands
-      end
-
-      transform_prefix = 'transform_'
-      scoring_method = @scoring_instructions["#{step_hash['method']}"]
-      if scoring_method.include?['card_scores']
-        @players.each_key do |dir|
-          scores[dir] = score_cards(cards_to_score[dir], scoring_method['card_scores'])
+    if check_conditional(step_hash['condition'])
+      scores = {}
+      @hands_rw_lock.with_read_lock do
+        if step_hash['player'].nil?
+          @players.each_key do |key|
+            scores[key] = 0
+          end
+        else
+          case step_hash['player']
+          when 'current'
+            scores[@cur_player] = 0
+          when 'next'
+            scores[@seat_placements.next(@cur_player)]
+          when 'last'
+            scores[@seat_placements.last(@cur_player)]
+          end
         end
-      elsif scoring_method.include?['defined_score']
-        @players.each_key do |dir|
-          scores[dir] = score_cards_special(cards_to_score[dir], scoring_method['defined_score'])
+
+        var player_owned_cards = true # Whether the scoring cards are associated with players, or are generic (like extra_hands)
+        cards_to_score = {}
+        subject = step_hash['subject']
+        case subject
+        when 'play_area'
+          cards_to_score = @play_areas
+        when 'won_cards'
+          cards_to_score = @won_cards
+        when 'hand'
+          cards_to_score = @hands
+        else
+          player_owned_cards = false
+          if @extra_hands.include?(subject)
+            cards_to_score = @extra_hands[subject]
+          elsif @fake_hands.include?(subject)
+            cards_to_score = @fake_hands[subject]
+          else
+            logger.warning("Tried to score an unknown set of cards: #{subject}")
+            @cur_step += 1
+            return
+          end
         end
-      end
 
-      transform_num = 1
-      next_transform = scoring_method["#{transform_prefix}#{transform_num}"]
-      until next_transform.nil?
-        scores = transform_scores(next_transform, scores)
+        transform_prefix = 'transform_'
+        scoring_method = @scoring_instructions[step_hash['method']]
+        if scoring_method.include?['card_scores']
+          @scores.each_key do |dir|
+            val next_cards_to_score = player_owned_cards ? cards_to_score : cards_to_score[dir]
+            scores[dir] = score_cards(next_cards_to_score, scoring_method['card_scores'])
+          end
+        elsif scoring_method.include?['defined_score']
+          @scores.each_key do |dir|
+            val next_cards_to_score = player_owned_cards ? cards_to_score : cards_to_score[dir]
+            scores[dir] = score_cards_special(next_cards_to_score, scoring_method['defined_score'])
+          end
+        end
 
-        transform_num += 1
+        transform_num = 1
         next_transform = scoring_method["#{transform_prefix}#{transform_num}"]
+        until next_transform.nil?
+          scores = transform_scores(next_transform, scores)
+
+          transform_num += 1
+          next_transform = scoring_method["#{transform_prefix}#{transform_num}"]
+        end
+      end
+
+      @hands_rw_lock.with_write_lock do
+        scores.each do |dir, score|
+          @player_scores[dir] = score + @player_scores[dir]
+
+          score_msg = { 'type' => 'change_score',
+                        'subject' => dir,
+                        'effect' => 'add',
+                        'value' => score }
+          add_outgoing_message(MessageBuilder.build_action_message(score_msg))
+        end
       end
     end
 
-    @hands_rw_lock.with_write_lock do
-      scores.each do |dir, score|
-        @player_scores[dir] = score + @player_scores[dir]
-
-        score_msg = { 'type' => 'change_score',
-                      'subject' => dir,
-                      'effect' => 'add',
-                      'value' => score }
-        add_outgoing_message(MessageBuilder.build_action_message(score_msg))
-      end
-    end
     @cur_step += 1
   end
 
@@ -804,11 +851,11 @@ class Game
 
   def score_cards_special(cards, scoring_method)
     if scoring_method.include?('x_of_a_kind')
-      score_cards_x_of_a_kind(cards, scoring_method["x_of_a_kind"])
+      score_cards_x_of_a_kind(cards, scoring_method['x_of_a_kind'])
     elsif scoring_method.include?('flush')
-      score_cards_x_of_a_kind(cards, scoring_method["flush"])
+      score_cards_x_of_a_kind(cards, scoring_method['flush'])
     elsif scoring_method.include?('straight')
-      score_cards_x_of_a_kind(cards, scoring_method["straight"])
+      score_cards_x_of_a_kind(cards, scoring_method['straight'])
     else
       logger.warn("Rules contained an unrecognized special scoring method: #{scoring_method}")
       0
@@ -819,7 +866,7 @@ class Game
     same_suit = scoring_method['same_suit'] || false
     wrap_allowed = false
 
-    value_order = %w[2 3 4 5 6 7 8 9 10 Jack Queen King Ace] # TODO Ace high or low?
+    value_order = %w[2 3 4 5 6 7 8 9 10 Jack Queen King Ace] # TODO: Ace high or low?
 
     # Grouping to permit only flush-straights if necessary
     groups =
@@ -868,28 +915,28 @@ class Game
     logger.debug("Scoring straights in hand: #{cards}, straights: #{straights} ")
 
     scored = 0
-    straights.each { |straight|
+    straights.each do |straight|
       size = straight.size
-      scored += (size * scoringMethod["score_per_card"]) if size >= scoringMethod["min_size"].to_i
-    }
+      scored += (size * scoringMethod['score_per_card']) if size >= scoringMethod['min_size'].to_i
+    end
   end
 
   def score_cards_flush(cards, scoring_method)
     sets = []
     cards.each { |card| sets[card.suit] = (sets[card.suit] || 0) + 1 }
     scored = 0
-    sets.each { |set_size|
-      scored += (set_size * scoring_method['score_per_card']) if set_size >= scoring_method["min_size"].to_i
-    }
+    sets.each do |set_size|
+      scored += (set_size * scoring_method['score_per_card']) if set_size >= scoring_method['min_size'].to_i
+    end
   end
 
   def score_cards_x_of_a_kind(cards, scoring_method)
     sets = []
     cards.each { |card| sets[card.value] = (sets[card.value] || 0) + 1 }
     scored = 0
-    sets.each { |set_size|
-      scored += (scoring_method[set_size.to_s] || 0)
-    }
+    sets.each do |set_size|
+      scored += scoring_method[set_size.to_s] || 0
+    end
   end
 
   def transform_scores(transform_instructions, scores)
@@ -912,9 +959,9 @@ class Game
         should_transform = compare_values(current, comparison, comparators) && should_transform
       end
 
-      unless comparison.nil?
-
-      end
+      #     unless comparison.nil?
+      #
+      #     end
 
       next unless should_transform
 
@@ -956,6 +1003,8 @@ class Game
   # @param conditional_hash All of the instructions contained within "condition"
   # @return True if conditional evaluates to true, False otherwise
   def check_conditional(conditional_hash)
+    return true if conditional_hash.nil?
+
     comparators = conditional_hash['comparators']
     comparison = conditional_hash['comparison']
     subject_is_current_player = conditional_hash['subject'] == 'cur_player'
@@ -979,6 +1028,8 @@ class Game
       else
         @player_scores.values.any? { |score| compare_values(score, comparison, comparators) }
       end
+    when 'last_actionable'
+      @last_actionable == conditional_hash['comparison']
     else
       if @counter_variables.include?(conditional_hash['type'])
         compare_values(@counter_variables[condition['type']], comparison, comparators)
@@ -1044,7 +1095,7 @@ class Game
   def change_cur_player(change_hash)
     case change_hash['change']
     when 'next'
-      @cur_player = get_next_player(@cur_player)
+      @cur_player = seat_placements.next(@cur_player)
     when 'last_winner'
       @cur_player = @latest_winner unless @latest_winner.nil?
     else
@@ -1055,8 +1106,8 @@ class Game
   def change_dealer(change_hash)
     case change_hash['change']
     when 'next'
-      @latest_dealer = !@latest_dealer.nil? ? get_next_player(@latest_dealer) : @cur_player
-      @cur_player = get_next_player(@latest_dealer)
+      @latest_dealer = !@latest_dealer.nil? ? seat_placements.next(@latest_dealer) : @cur_player
+      @cur_player = seat_placements.next(@latest_dealer)
     else
       logger.error("Unknown dealer change type: #{change_hash['change']}")
     end
