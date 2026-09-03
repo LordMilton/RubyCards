@@ -684,63 +684,65 @@ class Game
 
   def run_step_cleanup(step_hash)
     unless check_conditional(step_hash['condition'])
-      val hands_to_empty = []
+      hands_rw_lock.with_write_lock do
+        val hands_to_empty = []
 
-      val subject = step_hash['subject']
-      val subject_specifier =
-            if LOCATION.keys.include?(step_hash['subject_specifier'])
-              then step_hash['subject_specifier']
-            elsif step_hash['subject_specifier'] == 'cur_player'
-              then @cur_player
+        val subject = step_hash['subject']
+        val subject_specifier =
+              if LOCATION.keys.include?(step_hash['subject_specifier'])
+                then step_hash['subject_specifier']
+              elsif step_hash['subject_specifier'] == 'cur_player'
+                then @cur_player
+              end
+        case subject
+        when 'all'
+          hands.each { |hand| hands_to_empty.push(hand) }
+          play_areas.each { |play_area| hands_to_empty.push(play_area) }
+          won_cards.each { |won_cards_s| hands_to_empty.push(won_cards_s) }
+          hands_to_empty.push(discard)
+          extra_hands.each_value { |hand| hands_to_empty.push(hand) }
+          fake_hands.each_value { |hand| hand.clear }
+        when 'hand'
+          if subject_specifier.nil?
+            hands.each do |hand|
+              hands_to_empty.push(hand)
             end
-      case subject
-      when 'all'
-        hands.each { |hand| hands_to_empty.push(hand) }
-        play_areas.each { |play_area| hands_to_empty.push(play_area) }
-        won_cards.each { |won_cards_s| hands_to_empty.push(won_cards_s) }
-        hands_to_empty.push(discard)
-        extra_hands.each_value { |hand| hands_to_empty.push(hand) }
-        fake_hands.each_value { |hand| hand.clear }
-      when 'hand'
-        if subject_specifier.nil?
-          hands.each do |hand|
-            hands_to_empty.push(hand)
+          else
+            hands_to_empty.push(hands[subject_specifier])
           end
-        else
-          hands_to_empty.push(hands[subject_specifier])
-        end
-      when 'play_area'
-        if subject_specifier.nil?
-          play_areas.each do |play_area|
-            hands_to_empty.push(play_area)
+        when 'play_area'
+          if subject_specifier.nil?
+            play_areas.each do |play_area|
+              hands_to_empty.push(play_area)
+            end
+          else
+            hands_to_empty.push(play_areas[subject_specifier])
           end
-        else
-          hands_to_empty.push(play_areas[subject_specifier])
-        end
-      when 'won_cards'
-        if subject_specifier.nil?
-          won_cards.each do |won_cards_s|
-            hands_to_empty.push(won_cards_s)
+        when 'won_cards'
+          if subject_specifier.nil?
+            won_cards.each do |won_cards_s|
+              hands_to_empty.push(won_cards_s)
+            end
+          else
+            hands_to_empty.push(won_cards[subject_specifier])
           end
+        when 'discard'
+          hands_to_empty.push(discard)
         else
-          hands_to_empty.push(won_cards[subject_specifier])
+          if extra_hands.include?(subject)
+            hands_to_empty.push(extra_hands[subject])
+          elsif fake_hands.include?(subject)
+            fake_hands[subject].clear
+          else
+            logger.error("Tried to cleanup unknown cards: #{subject}")
+            @cur_step += 1
+            return
+          end
         end
-      when 'discard'
-        hands_to_empty.push(discard)
-      else
-        if extra_hands.include?(subject)
-          hands_to_empty.push(extra_hands[subject])
-        elsif fake_hands.include?(subject)
-          fake_hands[subject].clear
-        else
-          logger.error("Tried to cleanup unknown cards: #{subject}")
-          @cur_step += 1
-          return
-        end
-      end
 
-      hands_to_empty.each do |hand|
-        deck.push(hand.pop) until hand.empty?
+        hands_to_empty.each do |hand|
+          deck.push(hand.pop) until hand.empty?
+        end
       end
     end
 
