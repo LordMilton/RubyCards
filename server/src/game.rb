@@ -615,12 +615,17 @@ class Game
 
   # Step helpers
 
-  # @param step_hash Instructions for the step as a hash (the highest level should always be "step_x" where x is the number of the step)
-  def run_step(step_hash) # rubocop:disable Metrics/MethodLength
+  # @param step_hash Instructions for the step as a hash
+  #   (the highest level should always be "step_x" where x is the number of the step)
+  def run_step(step_hash) # rubocop:disable Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/AbcSize
     logger.debug("Running step: #{step_hash}")
     case step_hash['action']
     when 'setup'
       run_step_setup(step_hash)
+    when 'cleanup'
+      run_step_cleanup(step_hash)
+    when 'shuffle'
+      run_step_shuffle(step_hash)
     when 'actionable'
       run_step_actionable(step_hash)
     when 'repeat_until'
