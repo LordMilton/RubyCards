@@ -1,4 +1,4 @@
-require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment,Layout/EndOfLine
+require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment
 require 'json'
 require_relative './card'
 require_relative './message_builder'
@@ -894,60 +894,81 @@ class Game
 
   def run_step_score(step_hash)
     if check_conditional(step_hash['condition'])
-      scores = {}
+      var scores = {}
+      @players.each_key do |key|
+        scores[key] = 0
+      end
+
+      # Determine who should be scored
+      var players_to_score = []
       @hands_rw_lock.with_read_lock do
         if step_hash['player'].nil?
-          @players.each_key do |key|
-            scores[key] = 0
-          end
+          players_to_score = @players
         else
           case step_hash['player']
           when 'current'
-            scores[@cur_player] = 0
+            players_to_score.push(@cur_player)
           when 'next'
-            scores[@seat_placements.next(@cur_player)]
+            players_to_score.push(@seat_placements.next(@cur_player))
           when 'last'
-            scores[@seat_placements.last(@cur_player)]
+            players_to_score.push(@seat_placements.last(@cur_player))
           end
         end
 
-        var player_owned_cards = true # Whether the scoring cards are associated with players, or are generic (like extra_hands)
         cards_to_score = {}
-        subject = step_hash['subject']
-        case subject
-        when 'play_area'
-          cards_to_score = @play_areas
-        when 'won_cards'
-          cards_to_score = @won_cards
-        when 'hand'
-          cards_to_score = @hands
-        else
-          player_owned_cards = false
-          if @extra_hands.include?(subject)
-            cards_to_score = @extra_hands[subject]
-          elsif @fake_hands.include?(subject)
-            cards_to_score = @fake_hands[subject]
+        players_to_score.each do |dir|
+          cards_to_score[dir] = []
+        end
+
+        # Determine what cards should be scored (for each player to be scored)
+        subjects = step_hash['subject']
+        subjects.each do |subject|
+          case subject
+          when 'play_area', 'won_cards', 'hand'
+            source = case subject
+                     when 'play_area' then @play_areas
+                     when 'won_cards' then @won_cards
+                     when 'hand'      then @hands
+                     end
+            players_to_score.each do |dir|
+              cards_to_score[dir].append(source[dir])
+            end
           else
-            logger.warning("Tried to score an unknown set of cards: #{subject}")
-            @cur_step += 1
-            return
+            if @extra_hands.include?(subject)
+              players_to_score.each do |dir|
+                cards_to_score[dir].append(@extra_hands[subject])
+              end
+            elsif @fake_hands.include?(subject)
+              players_to_score.each do |dir|
+                cards_to_score[dir].append(@fake_hands[subject])
+              end
+            else
+              logger.warning("Asked to score an unknown set of cards: #{subject}")
+            end
           end
         end
 
+        cards_to_score.each do |dir, cards|
+          cards_to_score[dir] = cards.flatten
+          logger.error("nil cards found in cards_to_score for #{dir}") if cards_to_score[dir].any?(&:nil?)
+        end
+
+        # Score cards
         transform_prefix = 'transform_'
         scoring_method = @scoring_instructions[step_hash['method']]
         if scoring_method.include?['card_scores']
-          @scores.each_key do |dir|
-            val next_cards_to_score = player_owned_cards ? cards_to_score : cards_to_score[dir]
+          players_to_score.each do |dir|
+            val next_cards_to_score = cards_to_score[dir]
             scores[dir] = score_cards(next_cards_to_score, scoring_method['card_scores'])
           end
         elsif scoring_method.include?['defined_score']
-          @scores.each_key do |dir|
-            val next_cards_to_score = player_owned_cards ? cards_to_score : cards_to_score[dir]
+          players_to_score.each do |dir|
+            val next_cards_to_score = cards_to_score[dir]
             scores[dir] = score_cards_special(next_cards_to_score, scoring_method['defined_score'])
           end
         end
 
+        # Transform scores if needed
         transform_num = 1
         next_transform = scoring_method["#{transform_prefix}#{transform_num}"]
         until next_transform.nil?
@@ -958,6 +979,7 @@ class Game
         end
       end
 
+      # Apply scores
       @hands_rw_lock.with_write_lock do
         scores.each do |dir, score|
           @player_scores[dir] = score + @player_scores[dir]
