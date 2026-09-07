@@ -35,4 +35,9 @@ class SeatPlacements
 
     @seats[(@seats.index(seat) - nth) % @seats.size]
   end
+
+  def sort_seats(seats, starting_seat: SEAT_ORDER.first)
+    start_index = SEAT_ORDER.index(starting_seat)
+    seats.sort_by { |seat| (SEAT_ORDER.index(seat) - start_index) % SEAT_ORDER.length }
+  end
 end

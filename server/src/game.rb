@@ -477,7 +477,14 @@ class Game
       end
       add_outgoing_message(MessageBuilder.build_add_card_message(nil, nil, 'won_cards', dir))
     else
-      logger.warn("Tried to add card to unknown subject #{subject}")
+      if @extra_hands.include?(subject)
+        @extra_hands[subject].append(card)
+        add_outgoing_message(MessageBuilder.build_add_card_message(card.suit, card.value, subject))
+      elsif @fake_hands.include?(subject)
+        @fake_hands[subject].append(card)
+        # Don't send a message for this, players don't need to know about fake hands
+      else
+        logger.warn("Tried to add card to unknown subject #{subject}")
     end
   end
 
@@ -626,6 +633,8 @@ class Game
       run_step_cleanup(step_hash)
     when 'shuffle'
       run_step_shuffle(step_hash)
+    when 'deal'
+      run_step_deal(step_hash)
     when 'actionable'
       run_step_actionable(step_hash)
     when 'repeat_until'
@@ -816,6 +825,74 @@ class Game
         end
 
         hands_to_shuffle.each(&:shuffle)
+      end
+    end
+
+    @cur_step += 1
+  end
+
+  def run_step_deal(step_hash)
+    unless check_conditional(step_hash['condition'])
+      hands_rw_lock.with_write_lock do
+        val hands_to_deal = []
+
+        val subject = step_hash['subject'].nil? ? 'hand' : step_hash['subject']
+        val subject_specifier =
+              if LOCATION.keys.include?(step_hash['subject_specifier'])
+                then step_hash['subject_specifier']
+              elsif step_hash['subject_specifier'] == 'cur_player'
+                then @cur_player
+              end
+        case subject
+        when 'hand'
+          if subject_specifier.nil?
+            val hands_sorted = seat_placements.sort_seats(@hands)
+            hands_sorted.each do |hand|
+              hands_to_deal.push(hand)
+            end
+          else
+            hands_to_deal.push(@hands[subject_specifier])
+          end
+        when 'play_area'
+          if subject_specifier.nil?
+            @play_areas.each do |play_area|
+              hands_to_deal.push(play_area)
+            end
+          else
+            hands_to_deal.push(play_areas[subject_specifier])
+          end
+        when 'won_cards'
+          if subject_specifier.nil?
+            @won_cards.each do |won_cards_s|
+              hands_to_deal.push(won_cards_s)
+            end
+          else
+            hands_to_deal.push(@won_cards[subject_specifier])
+          end
+        when 'discard'
+          hands_to_deal.push(@discard)
+        else
+          if extra_hands.include?(subject)
+            hands_to_deal.push(@extra_hands[subject])
+          elsif fake_hands.include?(subject)
+            hands_to_deal.push(@fake_hands[subject])
+          else
+            logger.error("Asked to deal to unknown subject: #{subject}")
+          end
+        end
+
+        amount = step_hash['amount']
+        cards_each = amount.nil? ? ((@deck.length / hands_to_deal.length) + 1) : amount
+
+        cards_each.times do
+          break if @deck.empty?
+
+          hands_to_deal.each do |hand|
+            break if @deck.empty?
+
+            hand.push(@deck.pop)
+          end
+        end
       end
     end
 
