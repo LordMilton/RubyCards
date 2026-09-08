@@ -50,7 +50,7 @@ class Game
     @trick_comparator = nil
     @starting_deck = []
     set_starting_deck(@instructions['game']['deck'])
-    @deck = []
+    #@deck = []
     @discard = []
 
     # Extra hands can be made visible and hold actual, non-duplicated cards
@@ -114,8 +114,9 @@ class Game
       presetup(@instructions) # Sets repeatIncrementers and final_instruction_step
       @deck_visibility = @instructions['game']['deck']['visible']
       indicate_deck_visibility
-      @deck = @starting_deck
-      indicate_deck
+      for @starting_deck.each do |card|
+        hand_manager.add_card(card, 'deck')
+      end
 
       set_starting_discard(@instructions['game']['discard'])
 
@@ -203,6 +204,7 @@ class Game
           @latest_dealer = get_previous_player(@cur_player)
         end
         @seat_placements = SeatPlacements(@players)
+        @hand_manager = HandManager(@players.keys, @outgoing_msg_q)
       end
     end
   end
@@ -254,12 +256,6 @@ class Game
 
       logger.debug("setting starting deck to #{all_cards}")
       @starting_deck = all_cards.flatten
-    end
-  end
-
-  def indicate_deck
-    @deck.each do
-      add_outgoing_message(MessageBuilder.build_add_card_message(nil, nil, 'deck'))
     end
   end
 
@@ -347,9 +343,9 @@ class Game
 
     case msg['subject']
     when 'deck'
-      index_to_draw = @deck.size - 1
-      drawn_card = remove_card(index_to_draw, 'deck')
-      add_card(drawn_card, 'hand', player)
+      index_to_draw = hand_manager.deck.size - 1
+      drawn_card = hand_manager.remove_card(index_to_draw, 'deck')
+      hand_manager.add_card(drawn_card, 'hand', player)
     when 'discard'
       index_to_draw = @discard.size - 1
       drawn_card = remove_card(index_to_draw, 'discard')
@@ -434,9 +430,7 @@ class Game
   end
 
   def shuffle_deck
-    shuffled_deck = []
-    shuffled_deck.append(@deck.delete_at(@rng.rand(@deck.size))) until @deck.empty?
-    @deck = shuffled_deck
+    hand_manager.shuffle('deck')
   end
 
   def set_starting_discard(discard_instructions) # rubocop:disable Naming/AccessorMethodName
@@ -456,8 +450,7 @@ class Game
   def add_card(card, subject, dir = nil)
     case subject
     when 'deck'
-      @deck.append(card)
-      add_outgoing_message(MessageBuilder.build_add_card_message(nil, nil, 'deck'))
+      logger.error("Must add card to #{subject} through hand_manager")
     when 'discard'
       @discard.append(card)
       add_outgoing_message(MessageBuilder.build_add_card_message(card.suit, card.value, 'discard'))
@@ -493,8 +486,7 @@ class Game
 
     case subject
     when 'deck'
-      removed_card = @deck.delete_at(index)
-      add_outgoing_message(MessageBuilder.build_remove_card_message(index, 'deck'))
+      logger.error("Must remove card from #{subject} through hand_manager")
     when 'discard'
       removed_card = @discard.delete_at(index)
       add_outgoing_message(MessageBuilder.build_remove_card_message(index, 'discard'))
@@ -652,48 +644,6 @@ class Game
     else
       logger.error("Game instructions had an invalid action instruction: #{step_hash['action']}")
     end
-  end
-
-  def run_step_setup(step_hash)
-    change_prefix = -'change_'
-    change_num = 1
-    changes_remaining = true
-    while changes_remaining
-      cur_change = step_hash["#{change_prefix}#{change_num}"]
-      if cur_change.nil?
-        changes_remaining = false
-      else
-        case cur_change['action']
-        when 'reset'
-          case cur_change['subject']
-          when 'hand'
-            @hands.each do |dir, hand|
-              remove_card(0, 'hand', dir: dir) until hand.empty?
-            end
-          when 'won_cards'
-            @won_cards.each do |dir, hand|
-              remove_card(0, 'won_cards', dir: dir) until hand.empty?
-            end
-          end
-        when 'shuffle_deck'
-          shuffle_deck
-        when 'deal'
-          num_to_draw = cur_change['amount']
-          num_to_draw = @deck.size / @players.size if num_to_draw.nil?
-          while num_to_draw.positive?
-            @hands.each_key do |hand|
-              drawn_card = remove_card(0, 'deck')
-              add_card(drawn_card, 'hand', hand)
-            end
-            num_to_draw -= 1
-          end
-        end
-      end
-
-      change_num += 1
-    end
-
-    @cur_step += 1
   end
 
   def run_step_cleanup(step_hash)
@@ -882,15 +832,15 @@ class Game
         end
 
         amount = step_hash['amount']
-        cards_each = amount.nil? ? ((@deck.length / hands_to_deal.length) + 1) : amount
+        cards_each = amount.nil? ? ((hand_manager.deck.length / hands_to_deal.length) + 1) : amount
 
         cards_each.times do
-          break if @deck.empty?
+          break if hand_manager.deck.empty?
 
           hands_to_deal.each do |hand|
-            break if @deck.empty?
+            break if hand_manager.deck.empty?
 
-            hand.push(@deck.pop)
+            hand.push(hand_manager.remove_card(0, 'deck'))
           end
         end
       end
