@@ -171,7 +171,7 @@ class HandManager
     end
   end
 
-  def clear_hand(subject, dir: nil, return_to: nil)
+  def clear_hand(subject, dir: nil)
     with_write_lock do
       if @fake_hands.include?(subject)
         @fake_hands[subject].clear
@@ -180,10 +180,18 @@ class HandManager
 
       hand = resolve_hand(subject, dir)
       if hand.nil?
-        logger.warn("Tried to clear unknown subject: #{subject}")
+        logger.warn("Tried to clear cards from unknown subject: #{subject}")
         return
       end
-      return_to&.push(hand.pop) until hand.empty?
+
+      hand.length.times do
+        add_outgoing_message(MessageBuilder.build_remove_card_message(0, subject, dir))
+      end
+
+      until hand.empty?
+        @deck.push(hand.pop)
+        add_outgoing_message(MessageBuilder.build_add_card_message(nil, nil, 'deck'))
+      end
     end
   end
 
