@@ -41,7 +41,7 @@ class Game
     @players = {}
     @players_count = 0
     @player_scores = {}
-    @hands = {}
+    # @hands = {}
     @play_areas = {}
     @won_cards = {}
     # Recent additions to any play areas, beggining is oldest, end is most recent
@@ -197,7 +197,7 @@ class Game
           @players_ready[player] = false
           @players[player] = nil
           @player_scores[player] = 0
-          @hands[player] = []
+          # @hands[player] = []
           @play_areas[player] = []
           @won_cards[player] = []
           @cur_player = player
@@ -445,13 +445,8 @@ class Game
 
   def add_card(card, subject, dir = nil)
     case subject
-    when 'deck', 'discard'
+    when 'deck', 'discard', 'hand'
       logger.error("Must add card to #{subject} through hand_manager")
-    when 'hand'
-      @hands_rw_lock.with_write_lock do
-        @hands[dir].append(card)
-      end
-      indicate_drawn_card(card, dir, false, true)
     when 'play_area'
       @hands_rw_lock.with_write_lock do
         @play_areas[dir].append(card)
@@ -479,13 +474,8 @@ class Game
     removed_card = nil
 
     case subject
-    when 'deck', 'discard'
+    when 'deck', 'discard', 'hands'
       logger.error("Must remove card from #{subject} through hand_manager")
-    when 'hand'
-      @hands_rw_lock.with_write_lock do
-        removed_card = @hands[dir].delete_at(index)
-      end
-      add_outgoing_message(MessageBuilder.build_remove_card_message(index, 'hand', dir))
     when 'play_area'
       @hands_rw_lock.with_write_lock do
         removed_card = @play_areas[dir].delete_at(index)
@@ -639,7 +629,7 @@ class Game
 
   def run_step_cleanup(step_hash)
     unless check_conditional(step_hash['condition'])
-      hands_rw_lock.with_write_lock do
+      @hands_rw_lock.with_write_lock do
         val hands_to_empty = []
 
         val subject = step_hash['subject']
@@ -651,9 +641,9 @@ class Game
               end
         case subject
         when 'all'
-          hands.each_value do |hand|
+          @players.each_key do |dir|
             hands_to_empty.push(lambda {
-              @hand_manager.add_card(hand.pop, 'deck') until hand.empty?
+              @hand_manager.add_card(@hand_manager.remove_card(-1, 'hand', dir), 'deck') until hand.empty?
             })
           end
           play_areas.each_value do |play_area|
@@ -667,7 +657,7 @@ class Game
             })
           end
           hands_to_empty.push(lambda {
-            hand_manager.add_card(@hand_manager.remove_card(-1, 'discard'), 'deck') until hand_manager.discard.empty?
+            @hand_manager.add_card(@hand_manager.remove_card(-1, 'discard'), 'deck') until hand_manager.discard.empty?
           })
           extra_hands.each_value do |hand|
             hands_to_empty.push(lambda {
@@ -678,11 +668,13 @@ class Game
         when 'hand'
           if subject_specifier.nil?
             hands.each_value do |hand|
-              hands_to_empty.push(-> { @hand_manager.add_card(hand.pop, 'deck') until hand.empty? })
+              hands_to_empty.push(lambda {
+                @hand_manager.add_card(@hand_manager.remove_card(-1, 'hand', dir), 'deck') until hand.empty?
+              })
             end
           else
             hands_to_empty.push(lambda {
-              @hand_manager.add_card(hands[subject_specifier].pop, 'deck') until hands[subject_specifier].empty?
+              @hand_manager.add_card(@hand_manager.remove_card(-1, 'hand', subject_specifier), 'deck') until hand.empty?
             })
           end
         when 'play_area'
@@ -746,14 +738,14 @@ class Game
         case subject
         when 'hand'
           if subject_specifier.nil?
-            hands.each do |_, hand|
+            @players.each_key do |dir|
               hands_to_shuffle.push(
-                -> { hand.shuffle! }
+                -> { @hand_manager.shuffle('hand', dir) }
               )
             end
           else
             hands_to_shuffle.push(
-              -> { hands[subject_specifier].shuffle! }
+              -> { @hand_manager.shuffle('hand', subject_specifier) }
             )
           end
         when 'play_area'
@@ -822,14 +814,14 @@ class Game
             hands_sorted.each do |dir|
               hands_to_deal.push(
                 lambda do |card|
-                  @hands[dir].push(card)
+                  @hand_manager.add_card('hand', dir)
                 end
               )
             end
           else
             hands_to_deal.push(
               lambda do |card|
-                @hands[subject_specifier].push(card)
+                @hand_manager.add_card('hand', subject_specifier)
               end
             )
           end
@@ -1016,12 +1008,12 @@ class Game
           case subject
           when 'play_area', 'won_cards', 'hand'
             source = case subject
-                     when 'play_area' then @play_areas
-                     when 'won_cards' then @won_cards
-                     when 'hand'      then @hands
+                     when 'play_area' then ->(dir) { @play_areas[dir] }
+                     when 'won_cards' then ->(dir) { @won_cards[dir] }
+                     when 'hand'      then ->(dir) { @hand_manager.hands[dir] }
                      end
             players_to_score.each do |dir|
-              cards_to_score[dir].append(source[dir])
+              cards_to_score[dir].append(source.call(dir))
             end
           else
             if @extra_hands.include?(subject)
@@ -1265,9 +1257,9 @@ class Game
       compare_bool
     when 'hand_size'
       if subject_is_current_player
-        compare_values(@hands[@cur_player].size, comparison, comparators)
+        compare_values(@hand_manager.hands[@cur_player].size, comparison, comparators)
       else
-        @hands.values.any? { |hand| compare_values(hand.size, comparison, comparators) }
+        @hand_manager.hands.values.any? { |hand| compare_values(hand.size, comparison, comparators) }
       end
     when 'score'
       if subject_is_current_player
