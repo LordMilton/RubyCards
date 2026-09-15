@@ -6,6 +6,7 @@ require_relative './message_builder'
 
 class HandManager
   include MyLogger
+  RESERVED_NAMES = -%w[hand play_area won_cards deck discard]
 
   def initialize(players, outgoing_msg_q)
     @players = players
@@ -38,11 +39,15 @@ class HandManager
   # --- Hand creation ---
 
   def add_extra_hand(name)
+    return false unless check_hand_name_valid(name)
+
     @extra_hands[name] = []
     init_hidden_tracking(name)
   end
 
   def add_fake_hand(name)
+    return false unless check_hand_name_valid(name)
+
     @fake_hands[name] = []
     # Fake hands are never visible, no tracking needed
   end
@@ -204,6 +209,14 @@ class HandManager
   end
 
   private
+
+  def check_hand_name_valid(hand_name)
+    return false if RESERVED_NAMES.include?(hand_name) ||
+                    @extra_hands.keys.include?(hand_name) ||
+                    @fake_hands.keys.include?(hand_name)
+
+    true
+  end
 
   def init_hidden_tracking(subject, dir = nil)
     @hand_hidden_from[subject] ||= {}

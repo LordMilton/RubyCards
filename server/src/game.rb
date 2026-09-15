@@ -58,7 +58,7 @@ class Game
     # Fake hands will not be visible, and the cards in them are duplicated (when the deck is shuffled, these cards don't matter)
     # They are good for scoring when you need to score combinations of other hands but need to keep those hands separate
     #    for future scoring and such
-    @fake_hands = {}
+    # @fake_hands = {}
 
     # Data locks
     @players_rw_lock = Concurrent::ReadWriteLock.new
@@ -121,10 +121,14 @@ class Game
       set_starting_discard(@instructions['game']['discard'])
 
       @instructions['extra_hands'].each do |extra_hand|
-        @hand_manager.add_extra_hand(extra_hand)
+        unless @hand_manager.add_extra_hand(extra_hand)
+          logger.error("Instructions tried to make an extra hand that has a disallowed name '#{extra_hand}'")
+        end
       end
       @instructions['fake_hands'].each do |fake_hand|
-        @fake_hands[fake_hand] = []
+        unless @hand_manager.add_fake_hand(fake_hand)
+          logger.error("Instructions tried to make a fake hand that has a disallowed name '#{fake_hand}'")
+        end
       end
 
       until game_complete
@@ -450,9 +454,8 @@ class Game
     else
       if @hand_manager.extra_hands.include?(subject)
         logger.error("Must add card to extra_hand '#{subject}' through hand_manager")
-      elsif @fake_hands.include?(subject)
-        @fake_hands[subject].append(card)
-        # Don't send a message for this, players don't need to know about fake hands
+      elsif @hand_manager.fake_hands.include?(subject)
+        logger.error("Must add card to fake_hand '#{subject}' through hand_manager")
       else
         logger.warn("Tried to add card to unknown subject #{subject}")
       end
@@ -620,119 +623,48 @@ class Game
               end
         case subject
         when 'all'
-          # Clear hands
+          # Clear player cards
           @players.each_key do |dir|
-            hands_to_empty.push(lambda {
-              until @hand_manager.hand[dir].empty?
-                val removed_card = @hand_manager.remove_card(-1, 'hand', dir)
-                @hand_manager.add_card(removed_card, 'deck')
-              end
-            })
-          end
-          # Clear play areas
-          @players.each_key do |dir|
-            hands_to_empty.push(lambda {
-              until @hand_manager.play_area[dir].empty?
-                val removed_card = @hand_manager.remove_card(-1, 'play_area', dir)
-                @hand_manager.add_card(removed_card, 'deck')
-              end
-            })
-          end
-          # Clear won cards
-          @players.each_key do |dir|
-            hands_to_empty.push(lambda {
-              until @hand_manager.won_cards[dir].empty?
-                val removed_card = @hand_manager.remove_card(-1, 'won_cards', dir)
-                @hand_manager.add_card(removed_card, 'deck')
-              end
-            })
+            hands_to_empty.push(-> { @hand_manager.clear_hand('hand', dir) })
+            hands_to_empty.push(-> { @hand_manager.clear_hand('play_area', dir) })
+            hands_to_empty.push(-> { @hand_manager.clear_hand('won_cards', dir) })
           end
           # Clear discard
           hands_to_empty.push(lambda {
-            until hand_manager.discard.empty?
-              val removed_card = @hand_manager.remove_card(-1, 'discard')
-              @hand_manager.add_card(removed_card, 'deck')
-            end
+            @hand_manager.clear_hand('discard')
           })
           # Clear extra hands
           @hand_manager.extra_hands.each_key do |extra_hand_name|
             hands_to_empty.push(lambda {
-              until @hand_manager.extra_hands[extra_hand_name].empty?
-                val removed_card = @hand_manager.remove_card(extra_hand_name)
-                @hand_manager.add_card(removed_card, 'deck')
-              end
+              @hand_manager.clear_hand(extra_hand_name)
             })
           end
           # Clear fake hands
-          fake_hands.each_value(&:clear)
-        when 'hand'
-          if subject_specifier.nil?
-            @players.each_key do |dir|
-              hands_to_empty.push(lambda {
-                until @hand_manager.hand[dir].empty?
-                  val removed_card = @hand_manager.remove_card(-1, 'hand', dir)
-                  @hand_manager.add_card(removed_card, 'deck')
-                end
-              })
-            end
-          else
+          @hand_manager.fake_hands.each_key do |fake_hand_name|
             hands_to_empty.push(lambda {
-              until @hand_manager.hand[subject_specifier].empty?
-                val removed_card = @hand_manager.remove_card(-1, 'hand', subject_specifier)
-                @hand_manager.add_card(removed_card, 'deck')
-              end
+              @hand_manager.clear_hand(fake_hand_name)
             })
           end
-        when 'play_area'
+        when 'hand', 'play_area', 'won_cards'
           if subject_specifier.nil?
             @players.each_key do |dir|
               hands_to_empty.push(lambda {
-                until @hand_manager.play_area[dir].empty?
-                  val removed_card = @hand_manager.remove_card(-1, 'play_area', dir)
-                  @hand_manager.add_card(removed_card, 'deck')
-                end
+                @hand_manager.clear_hand(subject, dir)
               })
             end
           else
             hands_to_empty.push(lambda {
-              until @hand_manager.play_area[subject_specifier].empty?
-                val removed_card = @hand_manager.remove_card(-1, 'play_area', subject_specifier)
-                @hand_manager.add_card(removed_card, 'deck')
-              end
-            })
-          end
-        when 'won_cards'
-          if subject_specifier.nil?
-            @players.each_key do |dir|
-              hands_to_empty.push(lambda {
-                until @hand_manager.won_cards[dir].empty?
-                  val removed_card = @hand_manager.remove_card(-1, 'won_cards', dir)
-                  @hand_manager.add_card(removed_card, 'deck')
-                end
-              })
-            end
-          else
-            hands_to_empty.push(lambda {
-              until @hand_manager.won_cards[subject_specifier].empty?
-                val removed_card = @hand_manager.remove_card(-1, 'won_cards', subject_specifier)
-                @hand_manager.add_card(removed_card, 'deck')
-              end
+              @hand_manager.clear_hand(subject, subject_specifier)
             })
           end
         when 'discard'
           hands_to_empty.push(lambda {
-            @hand_manager.add_card(hand_manager.remove_card(-1, 'discard'), 'deck') until hand_manager.discard.empty?
+            @hand_manager.clear_hand(subject)
           })
         else
-          if @hand_manager.extra_hands.include?(subject)
-            hands_to_empty.push(lambda {
-              until @hand_manager.extra_hands[subject].empty?
-                val removed_card = @hand_manager.remove_card(0, subject)
-                @hand_manager.add_card(removed_card, 'deck')
-              end
-            })
-          elsif fake_hands.include?(subject)
-            hands_to_empty.push(-> { fake_hands[subject].clear })
+          if @hand_manager.extra_hands.include?(subject) ||
+             @hand_manager.fake_hands.include?(subject)
+            hands_to_empty.push(-> { @hand_manager.clear_hand(subject) })
           else
             logger.error("Tried to cleanup unknown cards: #{subject}")
             @cur_step += 1
@@ -760,51 +692,24 @@ class Game
                 then @cur_player
               end
         case subject
-        when 'hand'
+        when 'hand', 'play_area', 'won_cards'
           if subject_specifier.nil?
             @players.each_key do |dir|
               hands_to_shuffle.push(
-                -> { @hand_manager.shuffle_hand('hand', dir) }
+                -> { @hand_manager.shuffle_hand(subject, dir) }
               )
             end
           else
             hands_to_shuffle.push(
-              -> { @hand_manager.shuffle_hand('hand', subject_specifier) }
+              -> { @hand_manager.shuffle_hand(subject, subject_specifier) }
             )
           end
-        when 'play_area'
-          if subject_specifier.nil?
-            @players.each_key do |dir|
-              hands_to_shuffle.push(
-                -> { @hand_manager.shuffle_hand('play_area', dir) }
-              )
-            end
-          else
-            hands_to_shuffle.push(
-              -> { @hand_manager.shuffle_hand('play_area', subject_specifier) }
-            )
-          end
-        when 'won_cards'
-          if subject_specifier.nil?
-            @players.each_key do |dir|
-              hands_to_shuffle.push(
-                -> { @hand_manager.shuffle_hand('won_cards', dir) }
-              )
-            end
-          else
-            hands_to_shuffle.push(
-              -> { @hand_manager.shuffle_hand('won_cards', subject_specifier) }
-            )
-          end
-        when 'discard'
-          hands_to_shuffle.push(-> { @hand_manager.shuffle_hand('discard') })
-        when 'deck'
-          hands_to_shuffle.push(-> { @hand_manager.shuffle_hand('deck') })
+        when 'discard', 'deck'
+          hands_to_shuffle.push(-> { @hand_manager.shuffle_hand(subject) })
         else
-          if @hand_manager.extra_hands.include?(subject)
+          if @hand_manager.extra_hands.include?(subject) ||
+             @hand_manager.fake_hands.include?(subject)
             hands_to_shuffle.push(-> { @hand_manager.shuffle_hand(subject) })
-          elsif fake_hands.include?(subject)
-            hands_to_shuffle.push(-> { fake_hands[subject].shuffle! })
           else
             logger.error("Tried to cleanup unknown cards: #{subject}")
             @cur_step += 1
@@ -833,71 +738,34 @@ class Game
                 then @cur_player
               end
         case subject
-        when 'hand'
+        when 'hand', 'play_area', 'won_cards'
           if subject_specifier.nil?
             players_sorted.each do |dir|
               hands_to_deal.push(
                 lambda do |card|
-                  @hand_manager.add_card(card, 'hand', dir)
+                  @hand_manager.add_card(card, subject, dir)
                 end
               )
             end
           else
             hands_to_deal.push(
               lambda do |card|
-                @hand_manager.add_card(card, 'hand', subject_specifier)
-              end
-            )
-          end
-        when 'play_area'
-          if subject_specifier.nil?
-            players_sorted.each do |dir|
-              hands_to_deal.push(
-                lambda do |card|
-                  @hand_manager.add_card(card, 'play_area', dir)
-                end
-              )
-            end
-          else
-            hands_to_deal.push(
-              lambda do |card|
-                @hand_manager.add_card(card, 'play_areas', subject_specifier)
-              end
-            )
-          end
-        when 'won_cards'
-          if subject_specifier.nil?
-            players_sorted.each do |dir|
-              hands_to_deal.push(
-                lambda do |card|
-                  @hand_manager.add_card(card, 'won_cards', dir)
-                end
-              )
-            end
-          else
-            hands_to_deal.push(
-              lambda do |card|
-                @hand_manager.add_card(card, 'won_cards', subject_specifier)
+                @hand_manager.add_card(card, subject, subject_specifier)
               end
             )
           end
         when 'discard'
           hands_to_deal.push(
             lambda do |card|
-              hand_manager.add_card(card, 'discard')
+              hand_manager.add_card(card, subject)
             end
           )
         else
-          if @hand_manager.extra_hands.include?(subject)
+          if @hand_manager.extra_hands.include?(subject) ||
+             @hand_manager.fake_hands.include?(subject)
             hands_to_deal.push(
               lambda do |card|
                 @hand_manager.add_card(card, subject)
-              end
-            )
-          elsif fake_hands.include?(subject)
-            hands_to_deal.push(
-              lambda do |card|
-                @fake_hands[subject].push(card)
               end
             )
           else
@@ -1044,9 +912,9 @@ class Game
               players_to_score.each do |dir|
                 cards_to_score[dir].append(@hand_manager.extra_hands[subject])
               end
-            elsif @fake_hands.include?(subject)
+            elsif @hand_manager.fake_hands.include?(subject)
               players_to_score.each do |dir|
-                cards_to_score[dir].append(@fake_hands[subject])
+                cards_to_score[dir].append(@hand_manager.fake_hands[subject])
               end
             else
               logger.warning("Asked to score an unknown set of cards: #{subject}")
