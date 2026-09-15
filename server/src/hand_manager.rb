@@ -159,7 +159,7 @@ class HandManager
         return
       end
 
-      hand.length.times do |i|
+      hand.length.times do
         add_outgoing_message(MessageBuilder.build_remove_card_message(0, subject, dir))
       end
 

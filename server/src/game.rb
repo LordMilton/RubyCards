@@ -1,4 +1,4 @@
-require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment
+require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment,Layout/EndOfLine
 require 'json'
 require_relative './card'
 require_relative './message_builder'
@@ -41,24 +41,12 @@ class Game
     @players = {}
     @players_count = 0
     @player_scores = {}
-    # @hands = {}
-    # @play_areas = {}
-    # @won_cards = {}
     # Recent additions to any play areas, beggining is oldest, end is most recent
     # Items are array tuples: [player_direction, card]
     @recently_played = []
     @trick_comparator = nil
     @starting_deck = []
     set_starting_deck(@instructions['game']['deck'])
-    # @deck = []
-    # @discard = []
-
-    # Extra hands can be made visible and hold actual, non-duplicated cards
-    # @extra_hands = {}
-    # Fake hands will not be visible, and the cards in them are duplicated (when the deck is shuffled, these cards don't matter)
-    # They are good for scoring when you need to score combinations of other hands but need to keep those hands separate
-    #    for future scoring and such
-    # @fake_hands = {}
 
     # Data locks
     @players_rw_lock = Concurrent::ReadWriteLock.new
@@ -115,7 +103,7 @@ class Game
       @deck_visibility = @instructions['game']['deck']['visible']
       indicate_deck_visibility
       @starting_deck.each do |card|
-        hand_manager.add_card(card, 'deck')
+        @hand_manager.add_card(card, 'deck')
       end
 
       set_starting_discard(@instructions['game']['discard'])
@@ -392,7 +380,7 @@ class Game
 
     indices_to_discard.each do |i|
       discarded_card = remove_card(i, 'hand', dir: player)
-      hand_manager.add_card(discarded_card, 'discard')
+      @hand_manager.add_card(discarded_card, 'discard')
     end
 
     return unless @cur_actionables[actionable_name].zero?
@@ -447,7 +435,7 @@ class Game
     add_outgoing_message(MessageBuilder.build_info_message(msg), players_to_msg)
   end
 
-  def add_card(card, subject, dir = nil)
+  def add_card(_card, subject, _dir = nil)
     case subject
     when 'deck', 'discard', 'hand', 'won_cards', 'play_area'
       logger.error("Must add card to #{subject} through hand_manager")
@@ -462,7 +450,7 @@ class Game
     end
   end
 
-  def remove_card(index, subject, dir: nil, return_to_deck: false)
+  def remove_card(_index, subject, _dir: nil, return_to_deck: false)
     removed_card = nil
 
     case subject
@@ -474,7 +462,7 @@ class Game
 
     return if removed_card.nil?
 
-    hand_manager.add_card(removed_card, 'deck') if return_to_deck
+    @hand_manager.add_card(removed_card, 'deck') if return_to_deck
 
     removed_card
   end
@@ -681,7 +669,7 @@ class Game
 
   def run_step_shuffle(step_hash)
     unless check_conditional(step_hash['condition'])
-      hands_rw_lock.with_write_lock do
+      @hands_rw_lock.with_write_lock do
         val hands_to_shuffle = []
 
         val subject = step_hash['subject']
@@ -726,7 +714,7 @@ class Game
 
   def run_step_deal(step_hash)
     unless check_conditional(step_hash['condition'])
-      hands_rw_lock.with_write_lock do
+      @hands_rw_lock.with_write_lock do
         val hands_to_deal = []
 
         val players_sorted = seat_placements.sort_seats(@players.keys, starting_seat: seat_placements.next(@dealer))
@@ -757,7 +745,7 @@ class Game
         when 'discard'
           hands_to_deal.push(
             lambda do |card|
-              hand_manager.add_card(card, subject)
+              @hand_manager.add_card(card, subject)
             end
           )
         else
@@ -777,12 +765,12 @@ class Game
         cards_each = amount.nil? ? ((@hand_manager.deck.length / hands_to_deal.length) + 1) : amount
 
         cards_each.times do
-          break if hand_manager.deck.empty?
+          break if @hand_manager.deck.empty?
 
           hands_to_deal.each do |hand|
-            break if hand_manager.deck.empty?
+            break if @hand_manager.deck.empty?
 
-            hand.call(hand_manager.remove_card(-1, 'deck'))
+            hand.call(@hand_manager.remove_card(-1, 'deck'))
           end
         end
       end
@@ -1196,23 +1184,23 @@ class Game
     when 'dealer'
       change_dealer(change_hash)
     else
-      if counter_variables.include?(var_name_to_change)
+      if @counter_variables.include?(var_name_to_change)
         val value_change = change_hash['value']
         case change_hash['action']
         when 'set'
-          counter_variables[var_name_to_change] = value_change
+          @counter_variables[var_name_to_change] = value_change
         when 'add'
-          counter_variables[var_name_to_change] = counter_variables[var_name_to_change] + value_change
+          @counter_variables[var_name_to_change] = @counter_variables[var_name_to_change] + value_change
         else
           logger.error("Unknown counter variable change type: #{change_hash['action']}")
         end
-      elsif flag_variables.include?(var_name_to_change)
+      elsif @flag_variables.include?(var_name_to_change)
         val value_change = change_hash['value']
         case change_hash['action']
         when 'set'
-          flag_variables[var_name_to_change] = value_change
+          @flag_variables[var_name_to_change] = value_change
         when 'flip'
-          flag_variables[var_name_to_change] = !flag_variables[var_name_to_change]
+          @flag_variables[var_name_to_change] = !@flag_variables[var_name_to_change]
         else
           logger.error("Unknown flag variable change type: #{change_hash['action']}")
         end
