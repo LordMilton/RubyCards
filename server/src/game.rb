@@ -1,4 +1,4 @@
-require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment,Layout/EndOfLine
+require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment
 require 'json'
 require_relative './card'
 require_relative './message_builder'
@@ -42,7 +42,7 @@ class Game
     @players_count = 0
     @player_scores = {}
     # @hands = {}
-    @play_areas = {}
+    # @play_areas = {}
     # @won_cards = {}
     # Recent additions to any play areas, beggining is oldest, end is most recent
     # Items are array tuples: [player_direction, card]
@@ -198,7 +198,7 @@ class Game
           @players[player] = nil
           @player_scores[player] = 0
           # @hands[player] = []
-          @play_areas[player] = []
+          # @play_areas[player] = []
           # @won_cards[player] = []
           @cur_player = player
           @latest_dealer = get_previous_player(@cur_player)
@@ -445,13 +445,8 @@ class Game
 
   def add_card(card, subject, dir = nil)
     case subject
-    when 'deck', 'discard', 'hand', 'won_cards'
+    when 'deck', 'discard', 'hand', 'won_cards', 'play_area'
       logger.error("Must add card to #{subject} through hand_manager")
-    when 'play_area'
-      @hands_rw_lock.with_write_lock do
-        @play_areas[dir].append(card)
-      end
-      add_outgoing_message(MessageBuilder.build_add_card_message(card.suit, card.value, 'play_area', dir))
     else
       if @extra_hands.include?(subject)
         @extra_hands[subject].append(card)
@@ -469,13 +464,8 @@ class Game
     removed_card = nil
 
     case subject
-    when 'deck', 'discard', 'hands', 'won_cards'
+    when 'deck', 'discard', 'hands', 'won_cards', 'play_area'
       logger.error("Must remove card from #{subject} through hand_manager")
-    when 'play_area'
-      @hands_rw_lock.with_write_lock do
-        removed_card = @play_areas[dir].delete_at(index)
-      end
-      add_outgoing_message(MessageBuilder.build_remove_card_message(index, 'play_area', dir))
     else
       logger.warn("Tried to remove card from unknown subject #{subject}")
     end
@@ -637,9 +627,10 @@ class Game
               @hand_manager.add_card(removed_card, 'deck') until @hand_manager.hand[dir].empty?
             })
           end
-          play_areas.each_value do |play_area|
+          @players.each_key do |dir|
             hands_to_empty.push(lambda {
-              @hand_manager.add_card(play_area.pop, 'deck') until play_area.empty?
+              val removed_card = @hand_manager.remove_card(-1, 'play_area', dir)
+              @hand_manager.add_card(removed_card, 'deck') until @hand_manager.play_area[dir].empty?
             })
           end
           @players.each_key do |dir|
@@ -674,13 +665,16 @@ class Game
           end
         when 'play_area'
           if subject_specifier.nil?
-            play_areas.each_value do |play_area|
-              hands_to_empty.push(-> { @hand_manager.add_card(play_area.pop, 'deck') until play_area.empty? })
+            @players.each_key do |dir|
+              hands_to_empty.push(lambda {
+                val removed_card = @hand_manager.remove_card(-1, 'play_area', dir)
+                @hand_manager.add_card(removed_card, 'deck') until @hand_manager.play_area[dir].empty?
+              })
             end
           else
             hands_to_empty.push(lambda {
-              @hand_manager.add_card(play_areas[subject_specifier].pop,
-                                     'deck') until play_areas[subject_specifier].empty?
+              val removed_card = @hand_manager.remove_card(-1, 'play_area', subject_specifier)
+              @hand_manager.add_card(removed_card, 'deck') until @hand_manager.play_area[subject_specifier].empty?
             })
           end
         when 'won_cards'
@@ -749,14 +743,14 @@ class Game
           end
         when 'play_area'
           if subject_specifier.nil?
-            play_areas.each do |_, play_area|
+            @players.each_key do |dir|
               hands_to_shuffle.push(
-                -> { play_area.shuffle! }
+                -> { @hand_manager.shuffle_hand('play_area', dir) }
               )
             end
           else
             hands_to_shuffle.push(
-              -> { play_areas[subject_specifier].shuffle! }
+              -> { @hand_manager.shuffle_hand('play_area', subject_specifier) }
             )
           end
         when 'won_cards'
@@ -799,6 +793,7 @@ class Game
       hands_rw_lock.with_write_lock do
         val hands_to_deal = []
 
+        val players_sorted = seat_placements.sort_seats(@players.keys, starting_seat: seat_placements.next(@dealer))
         val subject = step_hash['subject'].nil? ? 'hand' : step_hash['subject']
         val subject_specifier =
               if LOCATION.keys.include?(step_hash['subject_specifier'])
@@ -809,8 +804,7 @@ class Game
         case subject
         when 'hand'
           if subject_specifier.nil?
-            val hands_sorted = seat_placements.sort_seats(@players.keys, starting_seat: seat_placements.next(@dealer))
-            hands_sorted.each do |dir|
+            players_sorted.each do |dir|
               hands_to_deal.push(
                 lambda do |card|
                   @hand_manager.add_card(card, 'hand', dir)
@@ -826,24 +820,23 @@ class Game
           end
         when 'play_area'
           if subject_specifier.nil?
-            @play_areas.each_value do |play_area|
+            players_sorted.each do |dir|
               hands_to_deal.push(
                 lambda do |card|
-                  play_area.push(card)
+                  @hand_manager.add_card(card, 'play_area', dir)
                 end
               )
             end
           else
             hands_to_deal.push(
               lambda do |card|
-                @play_areas[subject_specifier].push(card)
+                @hand_manager.add_card(card, 'play_areas', subject_specifier)
               end
             )
           end
         when 'won_cards'
           if subject_specifier.nil?
-            val hands_sorted = seat_placements.sort_seats(@players.keys, starting_seat: seat_placements.next(@dealer))
-            hands_sorted.each do |dir|
+            players_sorted.each do |dir|
               hands_to_deal.push(
                 lambda do |card|
                   @hand_manager.add_card(card, 'won_cards', dir)
@@ -963,8 +956,8 @@ class Game
 
     winning_index = @trick_comparator.get_best_card_index(last_trick)
     @latest_winner = @recently_played[winning_index][0]
-    @play_areas.each do |player, play_area|
-      remove_card(0, 'play_area', dir: player) until play_area.empty?
+    @players.each_key do |dir|
+      @hand_manager.remove_card(0, 'play_area', dir) until @hand_manager.play_area[dir].empty?
     end
     last_trick.each do |card|
       @hand_manager.add_card(card, 'won_cards', @latest_winner)
@@ -1008,7 +1001,7 @@ class Game
           case subject
           when 'play_area', 'won_cards', 'hand'
             source = case subject
-                     when 'play_area' then ->(dir) { @play_areas[dir] }
+                     when 'play_area' then ->(dir) { @hand_manager.play_area[dir] }
                      when 'won_cards' then ->(dir) { @hand_manager.won_cards[dir] }
                      when 'hand'      then ->(dir) { @hand_manager.hands[dir] }
                      end
