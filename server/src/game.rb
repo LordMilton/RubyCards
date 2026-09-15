@@ -54,7 +54,7 @@ class Game
     # @discard = []
 
     # Extra hands can be made visible and hold actual, non-duplicated cards
-    @extra_hands = {}
+    # @extra_hands = {}
     # Fake hands will not be visible, and the cards in them are duplicated (when the deck is shuffled, these cards don't matter)
     # They are good for scoring when you need to score combinations of other hands but need to keep those hands separate
     #    for future scoring and such
@@ -121,7 +121,7 @@ class Game
       set_starting_discard(@instructions['game']['discard'])
 
       @instructions['extra_hands'].each do |extra_hand|
-        @extra_hands[extra_hand] = []
+        @hand_manager.add_extra_hand(extra_hand)
       end
       @instructions['fake_hands'].each do |fake_hand|
         @fake_hands[fake_hand] = []
@@ -448,9 +448,8 @@ class Game
     when 'deck', 'discard', 'hand', 'won_cards', 'play_area'
       logger.error("Must add card to #{subject} through hand_manager")
     else
-      if @extra_hands.include?(subject)
-        @extra_hands[subject].append(card)
-        add_outgoing_message(MessageBuilder.build_add_card_message(card.suit, card.value, subject))
+      if @hand_manager.extra_hands.include?(subject)
+        logger.error("Must add card to extra_hand '#{subject}' through hand_manager")
       elsif @fake_hands.include?(subject)
         @fake_hands[subject].append(card)
         # Don't send a message for this, players don't need to know about fake hands
@@ -621,74 +620,103 @@ class Game
               end
         case subject
         when 'all'
+          # Clear hands
           @players.each_key do |dir|
             hands_to_empty.push(lambda {
-              val removed_card = @hand_manager.remove_card(-1, 'hand', dir)
-              @hand_manager.add_card(removed_card, 'deck') until @hand_manager.hand[dir].empty?
+              until @hand_manager.hand[dir].empty?
+                val removed_card = @hand_manager.remove_card(-1, 'hand', dir)
+                @hand_manager.add_card(removed_card, 'deck')
+              end
             })
           end
+          # Clear play areas
           @players.each_key do |dir|
             hands_to_empty.push(lambda {
-              val removed_card = @hand_manager.remove_card(-1, 'play_area', dir)
-              @hand_manager.add_card(removed_card, 'deck') until @hand_manager.play_area[dir].empty?
+              until @hand_manager.play_area[dir].empty?
+                val removed_card = @hand_manager.remove_card(-1, 'play_area', dir)
+                @hand_manager.add_card(removed_card, 'deck')
+              end
             })
           end
+          # Clear won cards
           @players.each_key do |dir|
             hands_to_empty.push(lambda {
-              val removed_card = @hand_manager.remove_card(-1, 'won_cards', dir)
-              @hand_manager.add_card(removed_card, 'deck') until @hand_manager.won_cards[dir].empty?
+              until @hand_manager.won_cards[dir].empty?
+                val removed_card = @hand_manager.remove_card(-1, 'won_cards', dir)
+                @hand_manager.add_card(removed_card, 'deck')
+              end
             })
           end
+          # Clear discard
           hands_to_empty.push(lambda {
-            val removed_card = @hand_manager.remove_card(-1, 'discard')
-            @hand_manager.add_card(removed_card, 'deck') until hand_manager.discard.empty?
+            until hand_manager.discard.empty?
+              val removed_card = @hand_manager.remove_card(-1, 'discard')
+              @hand_manager.add_card(removed_card, 'deck')
+            end
           })
-          extra_hands.each_value do |hand|
+          # Clear extra hands
+          @hand_manager.extra_hands.each_key do |extra_hand_name|
             hands_to_empty.push(lambda {
-              @hand_manager.add_card(hand.pop, 'deck') until hand.empty?
+              until @hand_manager.extra_hands[extra_hand_name].empty?
+                val removed_card = @hand_manager.remove_card(extra_hand_name)
+                @hand_manager.add_card(removed_card, 'deck')
+              end
             })
           end
+          # Clear fake hands
           fake_hands.each_value(&:clear)
         when 'hand'
           if subject_specifier.nil?
             @players.each_key do |dir|
               hands_to_empty.push(lambda {
-                val removed_card = @hand_manager.remove_card(-1, 'hand', dir)
-                @hand_manager.add_card(removed_card, 'deck') until @hand_manager.hand[dir].empty?
+                until @hand_manager.hand[dir].empty?
+                  val removed_card = @hand_manager.remove_card(-1, 'hand', dir)
+                  @hand_manager.add_card(removed_card, 'deck')
+                end
               })
             end
           else
             hands_to_empty.push(lambda {
-              val removed_card = @hand_manager.remove_card(-1, 'hand', subject_specifier)
-              @hand_manager.add_card(removed_card, 'deck') until @hand_manager.hand[subject_specifier].empty?
+              until @hand_manager.hand[subject_specifier].empty?
+                val removed_card = @hand_manager.remove_card(-1, 'hand', subject_specifier)
+                @hand_manager.add_card(removed_card, 'deck')
+              end
             })
           end
         when 'play_area'
           if subject_specifier.nil?
             @players.each_key do |dir|
               hands_to_empty.push(lambda {
-                val removed_card = @hand_manager.remove_card(-1, 'play_area', dir)
-                @hand_manager.add_card(removed_card, 'deck') until @hand_manager.play_area[dir].empty?
+                until @hand_manager.play_area[dir].empty?
+                  val removed_card = @hand_manager.remove_card(-1, 'play_area', dir)
+                  @hand_manager.add_card(removed_card, 'deck')
+                end
               })
             end
           else
             hands_to_empty.push(lambda {
-              val removed_card = @hand_manager.remove_card(-1, 'play_area', subject_specifier)
-              @hand_manager.add_card(removed_card, 'deck') until @hand_manager.play_area[subject_specifier].empty?
+              until @hand_manager.play_area[subject_specifier].empty?
+                val removed_card = @hand_manager.remove_card(-1, 'play_area', subject_specifier)
+                @hand_manager.add_card(removed_card, 'deck')
+              end
             })
           end
         when 'won_cards'
           if subject_specifier.nil?
             @players.each_key do |dir|
               hands_to_empty.push(lambda {
-                val removed_card = @hand_manager.remove_card(-1, 'won_cards', dir)
-                @hand_manager.add_card(removed_card, 'deck') until @hand_manager.won_cards[dir].empty?
+                until @hand_manager.won_cards[dir].empty?
+                  val removed_card = @hand_manager.remove_card(-1, 'won_cards', dir)
+                  @hand_manager.add_card(removed_card, 'deck')
+                end
               })
             end
           else
             hands_to_empty.push(lambda {
-              val removed_card = @hand_manager.remove_card(-1, 'won_cards', subject_specifier)
-              @hand_manager.add_card(removed_card, 'deck') until @hand_manager.won_cards[subject_specifier].empty?
+              until @hand_manager.won_cards[subject_specifier].empty?
+                val removed_card = @hand_manager.remove_card(-1, 'won_cards', subject_specifier)
+                @hand_manager.add_card(removed_card, 'deck')
+              end
             })
           end
         when 'discard'
@@ -696,9 +724,12 @@ class Game
             @hand_manager.add_card(hand_manager.remove_card(-1, 'discard'), 'deck') until hand_manager.discard.empty?
           })
         else
-          if extra_hands.include?(subject)
+          if @hand_manager.extra_hands.include?(subject)
             hands_to_empty.push(lambda {
-              @hand_manager.add_card(extra_hands[subject].pop, 'deck') until extra_hands[subject].empty?
+              until @hand_manager.extra_hands[subject].empty?
+                val removed_card = @hand_manager.remove_card(0, subject)
+                @hand_manager.add_card(removed_card, 'deck')
+              end
             })
           elsif fake_hands.include?(subject)
             hands_to_empty.push(-> { fake_hands[subject].clear })
@@ -770,8 +801,8 @@ class Game
         when 'deck'
           hands_to_shuffle.push(-> { @hand_manager.shuffle_hand('deck') })
         else
-          if extra_hands.include?(subject)
-            hands_to_shuffle.push(-> { extra_hands[subject].shuffle! })
+          if @hand_manager.extra_hands.include?(subject)
+            hands_to_shuffle.push(-> { @hand_manager.shuffle_hand(subject) })
           elsif fake_hands.include?(subject)
             hands_to_shuffle.push(-> { fake_hands[subject].shuffle! })
           else
@@ -857,10 +888,10 @@ class Game
             end
           )
         else
-          if extra_hands.include?(subject)
+          if @hand_manager.extra_hands.include?(subject)
             hands_to_deal.push(
               lambda do |card|
-                @extra_hands[subject].push(card)
+                @hand_manager.add_card(card, subject)
               end
             )
           elsif fake_hands.include?(subject)
@@ -1009,9 +1040,9 @@ class Game
               cards_to_score[dir].append(source.call(dir))
             end
           else
-            if @extra_hands.include?(subject)
+            if @hand_manager.extra_hands.include?(subject)
               players_to_score.each do |dir|
-                cards_to_score[dir].append(@extra_hands[subject])
+                cards_to_score[dir].append(@hand_manager.extra_hands[subject])
               end
             elsif @fake_hands.include?(subject)
               players_to_score.each do |dir|
