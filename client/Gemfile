@@ -4,6 +4,3 @@ source 'https://rubygems.org'
 
 gem 'concurrent-ruby'
 gem 'gosu'
-
-gem 'rubocop', require: false
-gem 'ruby-lsp'

@@ -3,7 +3,7 @@ require_relative './logger'
 
 # Helper class for handling relative seat placements
 class SeatPlacements
-  val SEAT_ORDER = -%w[N NE E SE S SW W NW]
+  SEAT_ORDER = %w[N NE E SE S SW W NW].freeze
 
   include MyLogger
 

@@ -1,6 +1,7 @@
 require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment,Layout/EndOfLine
 require 'json'
 require_relative './card'
+require_relative './hand_manager'
 require_relative './message_builder'
 require_relative './logger'
 require_relative './seat_placements'
@@ -27,7 +28,7 @@ class Game
   STEP_PREFIX = -'step_'
 
   # @param gamefile The filename for the instruction set (excluding the .json)
-  def initialize(game_file)
+  def initialize(game_file, players: {}, player_scores: {}, trick_comparator: nil, starting_deck: [])
     @rng = Random.new
 
     @game_started = false
@@ -38,15 +39,15 @@ class Game
     @scoring_instructions = @game_instructions['scoring']
     @final_instruction_step = 0
     @players_ready = {}
-    @players = {}
-    @players_count = 0
-    @player_scores = {}
+    @players = players || {}
+    @players_count = @players.size
+    @player_scores = player_scores || {}
     # Recent additions to any play areas, beggining is oldest, end is most recent
     # Items are array tuples: [player_direction, card]
     @recently_played = []
-    @trick_comparator = nil
-    @starting_deck = []
-    set_starting_deck(@instructions['game']['deck'])
+    @trick_comparator = trick_comparator
+    @starting_deck = starting_deck
+    set_starting_deck(@instructions['game']['deck']) if starting_deck.empty?
 
     # Data locks
     @players_rw_lock = Concurrent::ReadWriteLock.new
@@ -91,7 +92,7 @@ class Game
     if !all_players_ready
       logger.debug('Not starting game until room is full')
     elsif @game_started
-      logger.warning('Something tried to run the game an extra time')
+      logger.warn('Something tried to run the game an extra time')
     else
       logger.info('Starting game')
 
@@ -189,14 +190,11 @@ class Game
           @players_ready[player] = false
           @players[player] = nil
           @player_scores[player] = 0
-          # @hands[player] = []
-          # @play_areas[player] = []
-          # @won_cards[player] = []
           @cur_player = player
-          @latest_dealer = get_previous_player(@cur_player)
         end
-        @seat_placements = SeatPlacements(@players)
-        @hand_manager = HandManager(@players.keys, @outgoing_msg_q)
+        @seat_placements = SeatPlacements.new(@players.keys)
+        @hand_manager = HandManager.new(@players.keys, @outgoing_msg_q)
+        @latest_dealer = @seat_placements.last(@cur_player)
       end
     end
   end
@@ -292,18 +290,22 @@ class Game
     end
   end
 
+  # Handle a message from a player
+  #
+  # @param msg_json The message sent to the server
+  # @param player The player direction that sent the message
   def received_message(msg_json, player)
     msg = JSON.parse(msg_json)
     attempted_action = msg['action']
     if attempted_action.nil?
-      logger.warning('Received message with no attempted action, ignoring...')
+      logger.warn('Received message with no attempted action, ignoring...')
       return
     end
 
     # Check that a player isn't trying to play out of turn
     actionables_list = %w[draw play discard]
     if actionables_list.include?(attempted_action) && !@cur_player.nil? && player != @cur_player
-      logger.warning("Player in slot #{player} tried to perform #{attempted_action} out of turn! Ignoring...")
+      logger.warn("Player in slot #{player} tried to perform #{attempted_action} out of turn! Ignoring...")
       return
     end
 
@@ -321,10 +323,14 @@ class Game
       logger.debug("Received #{msg['action']} message from player #{player}")
       handle_discard_message(msg, player)
     else
-      logger.warning("Received unknown #{msg['action']} message from player #{player}")
+      logger.warn("Received unknown #{msg['action']} message from player #{player}")
     end
   end
 
+  # Handle a draw message from a player. Contributes to counting down the actionable latch
+  #
+  # @param msg The message indicating the cards that were drawn
+  # @param player The player direction that sent the draw message
   def handle_draw_message(msg, player)
     val actionable_name = 'draw'
 
@@ -349,6 +355,10 @@ class Game
     @actionable_latch.count_down
   end
 
+  # Handle a play message from a player. Contributes to counting down the actionable latch
+  #
+  # @param msg The message indicating the cards that were played
+  # @param player The player direction that sent the play message
   def handle_play_message(msg, player)
     val actionable_name = 'play'
 
@@ -369,6 +379,10 @@ class Game
     @actionable_latch.count_down
   end
 
+  # Handle a discard message from a player. Contributes to counting down the actionable latch
+  #
+  # @param msg The message indicating the cards that were discarded
+  # @param player The player direction that sent the discard message
   def handle_discard_message(msg, player)
     val actionable_name = 'discard'
 
@@ -388,12 +402,20 @@ class Game
     @actionable_latch.count_down
   end
 
+  # Parse the provided json list of cards
+  #
+  # @param card_list The json list of cards to parse
+  # @return A hash containing the 'flat'tened and 'hier'archical list of cards
   def parse_card_list(card_list)
     flat_parsed_cards = parse_cards_flat(card_list)
     hierarchical_parsed_cards = parse_cards_hierarchical(card_list)
     { 'flat' => flat_parsed_cards, 'hier' => hierarchical_parsed_cards }
   end
 
+  # Parse the provided json list of cards, discarding hierarchy
+  #
+  # @param list The json list of cards to parse
+  # @return The flattened card list
   def parse_cards_flat(list)
     list.flatten.map do |card_string|
       suit, value = card_string.split('_')
@@ -401,6 +423,10 @@ class Game
     end
   end
 
+  # Parse the provided json list of cards as they are provided, preserving hierarchy
+  #
+  # @param list The json list of cards to parse
+  # @return The hierarchical card list
   def parse_cards_hierarchical(list)
     list.map do |element|
       if element.is_a?(Array)
@@ -412,6 +438,10 @@ class Game
     end
   end
 
+  # Indicate to clients whether the deck needs to be visible (not whether the cards are face up/face down but whether the deck pile
+  #  can be seen on the screen at all)
+  #
+  # @param players_to_msg which player directions to inform about the deck visibility, defaults to all connected players
   def indicate_deck_visibility(players_to_msg = connected_players())
     msg = {
       "type": 'set_visibility',
@@ -421,11 +451,18 @@ class Game
     add_outgoing_message(MessageBuilder.build_info_message(msg), players_to_msg)
   end
 
+  # Create the initial discard from the instructions
+  #
+  # @param discard_instructions The initial discard instructions
   def set_starting_discard(discard_instructions) # rubocop:disable Naming/AccessorMethodName
     @discard_visibility = discard_instructions['visible']
     indicate_discard_visibility
   end
 
+  # Indicate to clients whether the discard needs to be visible (not whether the cards are face up/face down but whether the discard pile
+  #  can be seen on the screen at all)
+  #
+  # @param players_to_msg which player directions to inform about the discard visibility, defaults to all connected players
   def indicate_discard_visibility(players_to_msg = connected_players())
     msg = {
       "type": 'set_visibility',
@@ -435,38 +472,12 @@ class Game
     add_outgoing_message(MessageBuilder.build_info_message(msg), players_to_msg)
   end
 
-  def add_card(_card, subject, _dir = nil)
-    case subject
-    when 'deck', 'discard', 'hand', 'won_cards', 'play_area'
-      logger.error("Must add card to #{subject} through hand_manager")
-    else
-      if @hand_manager.extra_hands.include?(subject)
-        logger.error("Must add card to extra_hand '#{subject}' through hand_manager")
-      elsif @hand_manager.fake_hands.include?(subject)
-        logger.error("Must add card to fake_hand '#{subject}' through hand_manager")
-      else
-        logger.warn("Tried to add card to unknown subject #{subject}")
-      end
-    end
-  end
-
-  def remove_card(_index, subject, _dir: nil, return_to_deck: false)
-    removed_card = nil
-
-    case subject
-    when 'deck', 'discard', 'hands', 'won_cards', 'play_area'
-      logger.error("Must remove card from #{subject} through hand_manager")
-    else
-      logger.warn("Tried to remove card from unknown subject #{subject}")
-    end
-
-    return if removed_card.nil?
-
-    @hand_manager.add_card(removed_card, 'deck') if return_to_deck
-
-    removed_card
-  end
-
+  # Handles the request place message coming from a client. The server waits for these messages primarily to determine if a client is
+  #  actually ready. Can also be used to request a certain directional slot in the game, perhaps for a disconnect/reconnect back into
+  #  the same slot
+  #
+  # @param msg The request_place message sent to the server
+  # @param player The direction of the player who sent the message
   def handle_request_place_message(msg, player)
     final_player_dir = player
     unless msg['place'].nil?
@@ -492,20 +503,35 @@ class Game
     end
   end
 
+  # Indicate to connected players that a client connected to a player slot
+  #
+  # @param connected_player_dir The newly connected slot
+  # @param players_to_msg Which to players to inform, defaults to all the connected players (includes the newly connected player)
   def indicate_player_connected(connected_player_dir, players_to_msg = connected_players())
     outgoing_msg = { "type": 'player_connected', "location": connected_player_dir }
     add_outgoing_message(MessageBuilder.build_action_message(outgoing_msg), players_to_msg)
   end
 
+  # Indicate to remaining players that a player disconnected from the game
+  #
+  # @param disconnected_player_dir The disconnected player direction
   def indicate_player_disconnected(disconnected_player_dir)
     outgoing_msg = { "type": 'player_disconnected', "location": disconnected_player_dir }
     add_outgoing_message(MessageBuilder.build_action_message(outgoing_msg), connected_players)
   end
 
+  # Returns a list of all players in the game who aren't the provided player
+  #
+  # @param dir The player to exclude from the list
+  # @return The directions of all players in the game excluding the provided direction
   def get_other_players(dir)
     connected_players.filter { |player| player != dir }
   end
 
+  # Informs the indicated player of all connected players
+  # TODO Should inform about more of the game's state, hands, deck, scores, etc.
+  #
+  # @param player_dir Direction of the player's client to provide the state to
   def inform_state(player_dir)
     logger.info("Reupping state for player in slot #{player_dir}")
 
@@ -518,6 +544,9 @@ class Game
     # TODO: Indicate game state
   end
 
+  # Returns the list of player directions that have a connected client
+  #
+  # @return Array of connected directions
   def connected_players
     connected_players = nil
     @players_rw_lock.with_read_lock do
@@ -526,6 +555,10 @@ class Game
     connected_players.keys
   end
 
+  # Helper for sending messages to clients
+  #
+  # @param msg Message to send
+  # @param receiving_players The list of player directions to send the message to, simply fails for any players not connected
   def send_message(msg, receiving_players)
     logger.info("Sending message to #{receiving_players}")
     if !receiving_players.respond_to?('each')
@@ -552,19 +585,10 @@ class Game
     end
   end
 
-  def get_previous_player(location)
-    last_player = location
-    viable_player = false
-    until viable_player
-      last_player = num_to_direction_hash(LOCATION[last_player] - 1)
-      viable_player = true if @players.key?(last_player)
-    end
-
-    last_player
-  end
-
   # Step helpers
 
+  # Determine which step needs to run
+  #
   # @param step_hash Instructions for the step as a hash
   #   (the highest level should always be "step_x" where x is the number of the step)
   def run_step(step_hash) # rubocop:disable Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/AbcSize
@@ -597,6 +621,9 @@ class Game
     end
   end
 
+  # Run the step to empty hands, usually back into the deck
+  #
+  # @param step_hash The cleanup instructions
   def run_step_cleanup(step_hash)
     unless check_conditional(step_hash['condition'])
       @hands_rw_lock.with_write_lock do
@@ -667,6 +694,9 @@ class Game
     @cur_step += 1
   end
 
+  # Run the step shuffle any hand in the game
+  #
+  # @param step_hash The shuffling instructions
   def run_step_shuffle(step_hash)
     unless check_conditional(step_hash['condition'])
       @hands_rw_lock.with_write_lock do
@@ -712,6 +742,9 @@ class Game
     @cur_step += 1
   end
 
+  # Run the step to deal cards to hands within the game. Any hand in the game should be dealable except for the deck itself
+  #
+  # @param step_hash The dealing instructions
   def run_step_deal(step_hash)
     unless check_conditional(step_hash['condition'])
       @hands_rw_lock.with_write_lock do
@@ -779,6 +812,9 @@ class Game
     @cur_step += 1
   end
 
+  # Run the step to potentially repeat from an earlier step. Also tends to change a variable like moving the current player to the next player
+  #
+  # @param step_hash The repetition instructions
   def run_step_repeat(step_hash)
     condition_met = check_conditional(step_hash['condition'])
 
@@ -796,6 +832,9 @@ class Game
     end
   end
 
+  # Run the step to change the current step to the indicated step. If the conditional isn't met, just goes to the next step like normal steps do
+  #
+  # @param step_hash The goto instructions
   def run_step_goto(step_hash)
     condition_met = !step_hash.include?('condition') || check_conditional(step_hash['condition'])
 
@@ -806,6 +845,9 @@ class Game
     end
   end
 
+  # Run the step to change a variable within the game. e.g. setting the current player to the next player or adding 1 to a counter variable
+  #
+  # @param step_hash The variable changing instructions
   def run_step_change_variable(step_hash)
     val condition_met = check_conditional(step_hash('condition'))
 
@@ -814,6 +856,9 @@ class Game
     enact_variable_change(step_hash['change'])
   end
 
+  # Run the step to tell players to do something and wait for them to do it.
+  #
+  # @param step_hash The actionable instructions
   def run_step_actionable(step_hash)
     msg = { 'actionables' => step_hash['actionables'] }
 
@@ -836,6 +881,9 @@ class Game
     @cur_step += 1
   end
 
+  # Run the step to assign trick cards to a player. Moves the latest played cards to the trick winner's won cards and increments the step counter
+  #
+  # @param step_hash The trick winning instructions
   def run_step_assign_trick(_step_hash)
     last_trick = @recently_played.map do |pair|
       pair[1]
@@ -854,6 +902,9 @@ class Game
     @cur_step += 1
   end
 
+  # Run the step to score cards. Changes the player scores and increments the step counter
+  #
+  # @param step_hash The scoring instructions
   def run_step_score(step_hash)
     if check_conditional(step_hash['condition'])
       var scores = {}
@@ -905,7 +956,7 @@ class Game
                 cards_to_score[dir].append(@hand_manager.fake_hands[subject])
               end
             else
-              logger.warning("Asked to score an unknown set of cards: #{subject}")
+              logger.warn("Asked to score an unknown set of cards: #{subject}")
             end
           end
         end
@@ -918,12 +969,12 @@ class Game
         # Score cards
         transform_prefix = 'transform_'
         scoring_method = @scoring_instructions[step_hash['method']]
-        if scoring_method.include?['card_scores']
+        if scoring_method.include?('card_scores')
           players_to_score.each do |dir|
             val next_cards_to_score = cards_to_score[dir]
             scores[dir] = score_cards(next_cards_to_score, scoring_method['card_scores'])
           end
-        elsif scoring_method.include?['defined_score']
+        elsif scoring_method.include?('defined_score')
           players_to_score.each do |dir|
             val next_cards_to_score = cards_to_score[dir]
             scores[dir] = score_cards_special(next_cards_to_score, scoring_method['defined_score'])
@@ -958,29 +1009,48 @@ class Game
     @cur_step += 1
   end
 
+  # Run the step to determine a winner
+  #
+  # @param step_hash The comparison rules to determine a winner
+  # @return The direction of the winning player
   def run_step_winner(_step_hash)
     logger.warn('UNIMPLEMENTED ACTION TYPE')
     @cur_step += 1
   end
 
+  # Score cards based on the rules provided
+  #
+  # @param cards Cards to score
+  # @param scoring_method JSON hash of the points each card scores
+  # @return The score for the given cards
   def score_cards(cards, scoring_method)
     scored = cards.map { |card| scoring_method[card.to_s] || 0 }
     scored.sum
   end
 
+  # Score cards based on special, pre-defined rules, anything where the cards score based on the other cards in the list
+  #
+  # @param cards Cards to score
+  # @param scoring_method JSON hash of the special scoring rules
+  # @return The score for the given cards
   def score_cards_special(cards, scoring_method)
     if scoring_method.include?('x_of_a_kind')
       score_cards_x_of_a_kind(cards, scoring_method['x_of_a_kind'])
     elsif scoring_method.include?('flush')
-      score_cards_x_of_a_kind(cards, scoring_method['flush'])
+      score_cards_flush(cards, scoring_method['flush'])
     elsif scoring_method.include?('straight')
-      score_cards_x_of_a_kind(cards, scoring_method['straight'])
+      score_cards_straight(cards, scoring_method['straight'])
     else
       logger.warn("Rules contained an unrecognized special scoring method: #{scoring_method}")
       0
     end
   end
 
+  # Special scoring for straights
+  #
+  # @param cards Cards to score
+  # @param scoring_method JSON hash of flush straight rules, e.g. only score straights of 4 or more cards
+  # @return The score for the given cards
   def score_cards_straight(cards, scoring_method)
     same_suit = scoring_method['same_suit'] || false
     wrap_allowed = false
@@ -1036,28 +1106,46 @@ class Game
     scored = 0
     straights.each do |straight|
       size = straight.size
-      scored += (size * scoringMethod['score_per_card']) if size >= scoringMethod['min_size'].to_i
+      scored += (size * scoring_method['score_per_card']) if size >= scoring_method['min_size'].to_i
     end
+    scored
   end
 
+  # Special scoring for flushes
+  #
+  # @param cards Cards to score
+  # @param scoring_method JSON hash of flush scoring rules, e.g. only score flushes of 4 or more cards
+  # @return The score for the given cards
   def score_cards_flush(cards, scoring_method)
-    sets = []
+    sets = {}
     cards.each { |card| sets[card.suit] = (sets[card.suit] || 0) + 1 }
     scored = 0
-    sets.each do |set_size|
+    sets.each_value do |set_size|
       scored += (set_size * scoring_method['score_per_card']) if set_size >= scoring_method['min_size'].to_i
     end
+    scored
   end
 
+  # Special scoring for pairs, three of a kinds, etc.
+  #
+  # @param cards Cards to score
+  # @param scoring_method JSON hash of x_of_a_kind scoring rules, e.g. 3 of a kind is worth 6 points
+  # @return The score for the given cards
   def score_cards_x_of_a_kind(cards, scoring_method)
-    sets = []
+    sets = {}
     cards.each { |card| sets[card.value] = (sets[card.value] || 0) + 1 }
     scored = 0
-    sets.each do |set_size|
+    sets.each_value do |set_size|
       scored += scoring_method[set_size.to_s] || 0
     end
+    scored
   end
 
+  # Transforms the provided scores by following the transform_instructions
+  #
+  # @param transform_instructions JSON hash indicating whether/how to change the given scores
+  # @param scores Hash of scores hashed by player directions to be transformed
+  # @return The scores post-transformation as a hash. Will include all hashes originally provided in scores
   def transform_scores(transform_instructions, scores)
     condition = transform_instructions['condition']
     comparison = transform_instructions['comparison']
@@ -1119,6 +1207,8 @@ class Game
     scores
   end
 
+  # Checks the conditional provided in the conditional_hash
+  #
   # @param conditional_hash All of the instructions contained within "condition"
   # @return True if conditional evaluates to true, False otherwise
   def check_conditional(conditional_hash)
@@ -1161,8 +1251,12 @@ class Game
     end
   end
 
+  # Compares provided values based on the provided comparators
+  #
+  # @param current The current value of something
+  # @param comparison What to compare the current value to
+  # @param comparators List of comparison words ['equal', 'less', 'greater']. e.g. 'greater' means current > comparison
   def compare_values(current, comparison, comparators)
-    logger.debug("Checking if #{current} is #{comparators} to #{comparison}")
     comparators.any? do |comparator|
       case comparator
       when 'equal'   then current == comparison
@@ -1175,6 +1269,9 @@ class Game
     end
   end
 
+  # Changes a variable within the game based on the json change_hash
+  #
+  # @param change_hash JSON defining the variable to change and how to change it
   def enact_variable_change(change_hash)
     return if change_hash.nil?
 
@@ -1211,6 +1308,9 @@ class Game
     end
   end
 
+  # Changes the current player based off the json change_hash
+  #
+  # @param change_hash JSON Indicating the relative change of the current player
   def change_cur_player(change_hash)
     case change_hash['change']
     when 'next'
@@ -1222,6 +1322,9 @@ class Game
     end
   end
 
+  # Changes the current dealer based off the json change_hash
+  #
+  # @param change_hash JSON Indicating the relative change of the dealer
   def change_dealer(change_hash)
     case change_hash['change']
     when 'next'
@@ -1232,6 +1335,10 @@ class Game
     end
   end
 
+  # Calculate a player based on another player's position and a string change
+  #
+  # @param relative_player Player to base the returned player's position off of
+  # @param change String indicating the desired relative position of the returned player
   def calculate_player(relative_player, change)
     case change
     when 'next'

@@ -2,11 +2,12 @@
 
 require 'concurrent'
 require_relative './card'
+require_relative './logger'
 require_relative './message_builder'
 
 class HandManager
   include MyLogger
-  RESERVED_NAMES = -%w[hand play_area won_cards deck discard]
+  RESERVED_NAMES = %w[hand play_area won_cards deck discard].freeze
 
   def initialize(players, outgoing_msg_q)
     @players = players

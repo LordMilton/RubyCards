@@ -1,8 +1,5 @@
-# frozen_string_literal: true
-
-source "https://rubygems.org" # rubocop:disable Style/StringLiterals
+source 'https://rubygems.org'
 
 gem 'concurrent-ruby'
 
-#gem 'rubocop', require: false
-#gem 'ruby-lsp', require: false
+gem 'rspec', group: :test

@@ -5,6 +5,10 @@ A card game engine for playing various card games designed using Ruby's Gosu lib
 ## Client
 For connecting to the Ruby Cards server of your choice, though currently only tries to connect to a server running on `localhost:25252`
 
+### Development
+
+If you're going to use ruby-lsp and/or rubocop, use them with an external gemfile (vscode lets this work). Don't add them to the gemfile as they prevent creating windows executables.
+
 ### Running
 
 #### Windows
@@ -28,6 +32,10 @@ build-essential xorg-dev libudev-dev libts-dev libgl1-mesa-dev libglu1-mesa-dev 
 
 Runs the card game (currently only Hearts) on `localhost:25252` for clients to connect to.
 
+### Development
+
+If you're going to use ruby-lsp and/or rubocop, use them with an external gemfile (vscode lets this work). Don't add them to the gemfile as they prevent creating windows executables.
+
 ### Running
 
 #### Windows
@@ -37,3 +45,7 @@ Download the Windows executable from releases and run it. It should indicate it'
 #### Linux
 
 It's easier to get this stuff installed and running on linux, so it's not packaged. You need to pull down the source code and make sure your dependencies are installed (ruby 3.x). Then `bundle install`. From within `server/src` run `bundle exec ruby server.rb`
+
+### Testing
+
+Make sure you bundle install everything including the :test group. Run `bundle exec rspec specs` to run all the tests
