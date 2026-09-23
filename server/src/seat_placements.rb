@@ -17,7 +17,7 @@ class SeatPlacements
   end
 
   def next(seat)
-    get_nth_next(seat, 1)
+    nth_next(seat, 1)
   end
 
   def nth_next(seat, nth)
@@ -27,7 +27,7 @@ class SeatPlacements
   end
 
   def last(seat)
-    get_nth_last(seat, 1)
+    nth_last(seat, 1)
   end
 
   def nth_last(seat, nth)

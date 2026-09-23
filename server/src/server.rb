@@ -1,4 +1,4 @@
-require_relative './game' # rubocop:disable Layout/EndOfLine,Style/FrozenStringLiteralComment
+require_relative './game' # rubocop:disable Style/FrozenStringLiteralComment
 require_relative './logger'
 require_relative './tcp_client_handler'
 
@@ -19,7 +19,7 @@ class Server
       Thread.new(@server.accept) do |socket|
         ws = TcpClientConnection.new(socket)
 
-        @game ||= Game.new('Sample_Hearts.json')
+        @game ||= Game.new('Cribbage_2P.json')
         @game.add_player(ws)
 
         start_tick_thread(30)

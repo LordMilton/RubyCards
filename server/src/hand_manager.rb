@@ -81,7 +81,7 @@ class HandManager
         add_outgoing_message(MessageBuilder.build_add_card_message(card.suit, card.value, 'discard'))
       when 'hand'
         @hands[dir].append(card)
-        indicate_added_card_to_hand(card, dir, @players)
+        indicate_added_card_to_hand(card, dir)
       when 'play_area'
         @play_areas[dir].append(card)
         add_outgoing_message(
@@ -108,7 +108,7 @@ class HandManager
     end
   end
 
-  def remove_card(index, subject, dir: nil)
+  def remove_card(index, subject, dir = nil)
     removed_card = nil
 
     with_write_lock do
@@ -152,7 +152,7 @@ class HandManager
     removed_card
   end
 
-  def shuffle_hand(subject, dir: nil)
+  def shuffle_hand(subject, dir = nil)
     with_write_lock do
       hand = resolve_hand(subject, dir)
       if hand.nil?
@@ -177,7 +177,7 @@ class HandManager
     end
   end
 
-  def clear_hand(subject, dir: nil)
+  def clear_hand(subject, dir = nil)
     with_write_lock do
       if @fake_hands.include?(subject)
         @fake_hands[subject].clear

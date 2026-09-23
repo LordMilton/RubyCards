@@ -1,4 +1,4 @@
-require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment,Layout/EndOfLine
+require 'concurrent' # rubocop:disable Style/FrozenStringLiteralComment
 require 'json'
 require_relative './card'
 require_relative './hand_manager'
@@ -28,49 +28,81 @@ class Game
   STEP_PREFIX = -'step_'
 
   # @param gamefile The filename for the instruction set (excluding the .json)
+  # The rest of the parameters are for testing with dependency injection
+  # @param players TcpClientConnections keyed by directions. Removes the need to add_players, but the game will still expect
+  #                the players to send request_place message to indicate readiness
+  # @param player_scores Player scores keyed by directions
+  # @param trick_comparator The comparator determining trick winners based on played cards
+  # @param starting_deck The list of cards the game should start with. Assuming the game doesn't have instructions to shuffle, this lets you
+  #                      set the order of the deck to be what you want
   def initialize(game_file, players: {}, player_scores: {}, trick_comparator: nil, starting_deck: [])
     @rng = Random.new
 
+    # Whether the game is running. It cannot be run twice
     @game_started = false
+    # The JSON instruction set retrieved from the game_file
     @instructions = JSON.parse(IO.read("#{GAMES_FOLDER}#{game_file}").gsub(/\r/, ' ').gsub(/\n/, ' '))
+    # Separated instruction sets
     @game_instructions = @instructions['game']
     @deck_instructions = @game_instructions['deck']
     @discard_instructions = @game_instructions['discard']
     @scoring_instructions = @game_instructions['scoring']
+    # The final instruction step in the game, going beyond it will stop execution of the game
     @final_instruction_step = 0
+    # Boolean player readiness keyed by player direction. Only set to true by successful exchange of request_place messages from clients
     @players_ready = {}
+    # The list of client websockets keyed by player direction
     @players = players || {}
+    # The number of players connected to the game (not the number of _ready_ players)
     @players_count = @players.size
+    # Each players' scores keyed by player direction
     @player_scores = player_scores || {}
     # Recent additions to any play areas, beggining is oldest, end is most recent
     # Items are array tuples: [player_direction, card]
     @recently_played = []
-    @trick_comparator = trick_comparator
+    # The initial deck for the game. The cards in this deck are the only cards that will ever be in the game
     @starting_deck = starting_deck
-    set_starting_deck(@instructions['game']['deck']) if starting_deck.empty?
+    set_starting_deck(@instructions['game']['deck']) if starting_deck.nil? || starting_deck.empty?
+    # The trick comparator object for determining trick winners
+    #  Falls back on using the starting_deck as is if something is setting the starting_deck (like a test) but doesn't
+    #  set the comparator
+    @trick_comparator = trick_comparator || TrickComparator.new(@starting_deck)
 
     # Data locks
+    # Lock when manipulating player websocket connections
     @players_rw_lock = Concurrent::ReadWriteLock.new
+    # Lock when manipulating cards in any hand (including deck, discard, extra hands)
     @hands_rw_lock = Concurrent::ReadWriteLock.new
 
     # Visibility state
+    # Whether the deck should be visible on the players' screens
     @deck_visibility = false
+    # Whether the discard should be visible on the players' screens
     @discard_visibility = false
 
     # Special variables for use by the instructions during the game
+    # Who last won a trick or round
     @latest_winner = nil
+    # The latest _changes_ to scores. e.g. North just got 3 points and has 21 now, this indicates that {N: 3}
     @latest_scores = {}
+    # The latest bids
     @latest_bids = {}
+    # Whose turn it currently is
     @cur_player = nil
+    # Who dealt last
     @latest_dealer = nil
+    # The last actionable that was performed by any player (draw/discard/play)
     @latest_actionable = nil
 
     # Variables for waiting on and handling client actions ("actionables")
+    # Lets us block until the current player has actually taken their full turn
     @actionable_latch = nil
+    # The actionables currently permitted to be performed by the current player
     @cur_actionables = {}
 
     # Some variables to avoid having to pass around to/from helper functions
     @cur_step = 1
+    # Any incrementers for repeat_untils that are set to happen x number of times. Keyed by step number
     @repeat_incrementers = {}
 
     # Arbitrary variables created in the ruleset
@@ -84,6 +116,7 @@ class Game
     initialize_game
   end
 
+  # Tries to run the initialized game within this object. Will fail to run if the game isn't full or if this was already run successfully
   def run_game
     all_players_ready = false
     @players_rw_lock.with_read_lock do
@@ -109,12 +142,12 @@ class Game
 
       set_starting_discard(@instructions['game']['discard'])
 
-      @instructions['extra_hands'].each do |extra_hand|
+      @instructions['game']['extra_hands'].each do |extra_hand|
         unless @hand_manager.add_extra_hand(extra_hand)
           logger.error("Instructions tried to make an extra hand that has a disallowed name '#{extra_hand}'")
         end
       end
-      @instructions['fake_hands'].each do |fake_hand|
+      @instructions['game']['fake_hands'].each do |fake_hand|
         unless @hand_manager.add_fake_hand(fake_hand)
           logger.error("Instructions tried to make a fake hand that has a disallowed name '#{fake_hand}'")
         end
@@ -134,7 +167,10 @@ class Game
     end
   end
 
+  # Adds a player to the game, optionally requesting a specific slot
+  #
   # @param websocket The websocket connection to the player
+  # @param player_dir The requested direction for the player. This also gets handled by request_place, so might be deprecated
   def add_player(websocket, player_dir = nil)
     logger.debug("Adding new player with requested direction: #{player_dir}") unless player_dir.nil?
 
@@ -170,6 +206,8 @@ class Game
     run_game
   end
 
+  # Call to allow sending any stored messages in the outgoing queue. This should be run regularly on a separate thread from the
+  #  actual game
   def tick
     temp_outgoing_msg_q = @outgoing_msg_q
     @outgoing_msg_q = []
@@ -182,6 +220,7 @@ class Game
 
   private
 
+  # Initializes, but does not start, a game based off the instruction set provided when creating the object
   def initialize_game
     init_instructions = @instructions['game']
     @players_rw_lock.with_write_lock do
@@ -199,6 +238,9 @@ class Game
     end
   end
 
+  # Does some work before the game starts for things like initializing loop counters
+  #
+  # @param instructions_hash Entire JSON game intructions
   def presetup(instructions_hash)
     steps_complete = false
     current_step = 1
@@ -218,6 +260,9 @@ class Game
     end
   end
 
+  # Builds the initial deck of cards based off the instructions
+  #
+  # @param deck_instructions JSON intructions for creating the deck
   def set_starting_deck(deck_instructions)
     cards = deck_instructions['cards']
     cards_list = cards['all']
@@ -225,7 +270,7 @@ class Game
     if !cards_list.nil?
       cards_parsed = parse_card_list(cards_list)
       @starting_deck = cards_parsed['flat']
-      @trick_comparator = TrickComparator.new(cards_parsed['hier'])
+      @trick_comparator ||= TrickComparator.new(cards_parsed['hier'])
     else # card list with some level of trump (may be determined at the start of a hand)
       all_cards = []
       trump_list = cards['trump']
@@ -242,36 +287,25 @@ class Game
       fail_flat = fail_parsed['flat']
       all_cards.append(fail_flat)
 
-      @trick_comparator = TrickComparator.new(trump_hier, fail_cards: fail_hier)
+      @trick_comparator ||= TrickComparator.new(trump_hier, fail_cards: fail_hier)
 
       logger.debug("setting starting deck to #{all_cards}")
       @starting_deck = all_cards.flatten
     end
   end
 
-  def indicate_drawn_card(card, player_drawing, own_hand_hidden, other_hands_hidden)
-    drawing_hand_suit = own_hand_hidden ? nil : card.suit
-    drawing_hand_value = own_hand_hidden ? nil : card.value
-    other_hands_suit = other_hands_hidden ? nil : card.suit
-    other_hands_value = other_hands_hidden ? nil : card.value
-
-    drawing_player_msg = MessageBuilder.build_add_card_message(drawing_hand_suit,
-                                                               drawing_hand_value,
-                                                               'hand',
-                                                               player_drawing)
-    other_player_msg = MessageBuilder.build_add_card_message(other_hands_suit,
-                                                             other_hands_value,
-                                                             'hand',
-                                                             player_drawing)
-
-    add_outgoing_message(drawing_player_msg, [player_drawing])
-    add_outgoing_message(other_player_msg, get_other_players(player_drawing))
-  end
-
+  # Adds an outgoing message to the queue
+  #
+  # @param msg The message sent to send to players
+  # @param receiving_players The player directions that should receive the message, defaults to all connected players
   def add_outgoing_message(msg, receiving_players = connected_players())
     @outgoing_msg_q.push([msg, receiving_players])
   end
 
+  # Define the callbacks for a websocket
+  #
+  # @param websocket The websocket whose callbacks we're defining
+  # @param player The player direction associated with the websocket
   def define_websocket_responses(websocket, player_dir)
     websocket.onmessage do |msg, _|
       logger.info("Received message from player_dir #{player_dir}")
@@ -332,7 +366,7 @@ class Game
   # @param msg The message indicating the cards that were drawn
   # @param player The player direction that sent the draw message
   def handle_draw_message(msg, player)
-    val actionable_name = 'draw'
+    actionable_name = 'draw'
 
     return if @cur_actionables[actionable_name].nil? || @cur_actionables[actionable_name] <= 0
 
@@ -360,7 +394,7 @@ class Game
   # @param msg The message indicating the cards that were played
   # @param player The player direction that sent the play message
   def handle_play_message(msg, player)
-    val actionable_name = 'play'
+    actionable_name = 'play'
 
     return if @cur_actionables[actionable_name].nil? || @cur_actionables[actionable_name] <= 0
 
@@ -384,7 +418,7 @@ class Game
   # @param msg The message indicating the cards that were discarded
   # @param player The player direction that sent the discard message
   def handle_discard_message(msg, player)
-    val actionable_name = 'discard'
+    actionable_name = 'discard'
 
     return if @cur_actionables[actionable_name].nil? || @cur_actionables[actionable_name] <= 0
 
@@ -625,17 +659,18 @@ class Game
   #
   # @param step_hash The cleanup instructions
   def run_step_cleanup(step_hash)
-    unless check_conditional(step_hash['condition'])
+    logger.info('Running deal step')
+    if check_conditional(step_hash['condition'])
       @hands_rw_lock.with_write_lock do
-        val hands_to_empty = []
+        hands_to_empty = []
 
-        val subject = step_hash['subject']
-        val subject_specifier =
-              if LOCATION.keys.include?(step_hash['subject_specifier'])
-                then step_hash['subject_specifier']
-              elsif step_hash['subject_specifier'] == 'cur_player'
-                then @cur_player
-              end
+        subject = step_hash['subject']
+        subject_specifier =
+          if LOCATION.keys.include?(step_hash['subject_specifier'])
+            then step_hash['subject_specifier']
+          elsif step_hash['subject_specifier'] == 'cur_player'
+            then @cur_player
+          end
         case subject
         when 'all'
           # Clear player cards
@@ -689,6 +724,8 @@ class Game
 
         hands_to_empty.each(&:call)
       end
+    else
+      logger.debug('Skipped step due to falsy conditional')
     end
 
     @cur_step += 1
@@ -698,17 +735,18 @@ class Game
   #
   # @param step_hash The shuffling instructions
   def run_step_shuffle(step_hash)
-    unless check_conditional(step_hash['condition'])
+    logger.info('Running shuffle step')
+    if check_conditional(step_hash['condition'])
       @hands_rw_lock.with_write_lock do
-        val hands_to_shuffle = []
+        hands_to_shuffle = []
 
-        val subject = step_hash['subject']
-        val subject_specifier =
-              if LOCATION.keys.include?(step_hash['subject_specifier'])
-                then step_hash['subject_specifier']
-              elsif step_hash['subject_specifier'] == 'cur_player'
-                then @cur_player
-              end
+        subject = step_hash['subject']
+        subject_specifier =
+          if LOCATION.keys.include?(step_hash['subject_specifier'])
+            then step_hash['subject_specifier']
+          elsif step_hash['subject_specifier'] == 'cur_player'
+            then @cur_player
+          end
         case subject
         when 'hand', 'play_area', 'won_cards'
           if subject_specifier.nil?
@@ -737,6 +775,8 @@ class Game
 
         hands_to_shuffle.each(&:call)
       end
+    else
+      logger.debug('Skipped step due to falsy conditional')
     end
 
     @cur_step += 1
@@ -746,18 +786,19 @@ class Game
   #
   # @param step_hash The dealing instructions
   def run_step_deal(step_hash)
-    unless check_conditional(step_hash['condition'])
+    logger.info('Running deal step')
+    if check_conditional(step_hash['condition'])
       @hands_rw_lock.with_write_lock do
-        val hands_to_deal = []
+        hands_to_deal = []
 
-        val players_sorted = seat_placements.sort_seats(@players.keys, starting_seat: seat_placements.next(@dealer))
-        val subject = step_hash['subject'].nil? ? 'hand' : step_hash['subject']
-        val subject_specifier =
-              if LOCATION.keys.include?(step_hash['subject_specifier'])
-                then step_hash['subject_specifier']
-              elsif step_hash['subject_specifier'] == 'cur_player'
-                then @cur_player
-              end
+        players_sorted = @seat_placements.sort_seats(@players.keys, starting_seat: @seat_placements.next(@dealer))
+        subject = step_hash['subject'].nil? ? 'hand' : step_hash['subject']
+        subject_specifier =
+          if LOCATION.keys.include?(step_hash['subject_specifier'])
+            then step_hash['subject_specifier']
+          elsif step_hash['subject_specifier'] == 'cur_player'
+            then @cur_player
+          end
         case subject
         when 'hand', 'play_area', 'won_cards'
           if subject_specifier.nil?
@@ -807,6 +848,8 @@ class Game
           end
         end
       end
+    else
+      logger.debug('Skipped step due to falsy conditional')
     end
 
     @cur_step += 1
@@ -818,8 +861,8 @@ class Game
   def run_step_repeat(step_hash)
     condition_met = check_conditional(step_hash['condition'])
 
-    val change_prefix = 'change_'
-    var change_num = 1
+    change_prefix = 'change_'
+    change_num = 1
     while step_hash.include?("#{change_prefix}#{change_num}")
       enact_variable_change(step_hash["#{change_prefix}#{change_num}"])
       change_num += 1
@@ -849,7 +892,7 @@ class Game
   #
   # @param step_hash The variable changing instructions
   def run_step_change_variable(step_hash)
-    val condition_met = check_conditional(step_hash('condition'))
+    condition_met = check_conditional(step_hash['condition'])
 
     return unless condition_met
 
@@ -892,7 +935,7 @@ class Game
     winning_index = @trick_comparator.get_best_card_index(last_trick)
     @latest_winner = @recently_played[winning_index][0]
     @players.each_key do |dir|
-      @hand_manager.remove_card(0, 'play_area', dir) until @hand_manager.play_area[dir].empty?
+      @hand_manager.remove_card(0, 'play_area', dir) until @hand_manager.play_areas[dir].empty?
     end
     last_trick.each do |card|
       @hand_manager.add_card(card, 'won_cards', @latest_winner)
@@ -907,13 +950,13 @@ class Game
   # @param step_hash The scoring instructions
   def run_step_score(step_hash)
     if check_conditional(step_hash['condition'])
-      var scores = {}
+      scores = {}
       @players.each_key do |key|
         scores[key] = 0
       end
 
       # Determine who should be scored
-      var players_to_score = []
+      players_to_score = []
       @hands_rw_lock.with_read_lock do
         if step_hash['player'].nil?
           players_to_score = @players
@@ -939,7 +982,7 @@ class Game
           case subject
           when 'play_area', 'won_cards', 'hand'
             source = case subject
-                     when 'play_area' then ->(dir) { @hand_manager.play_area[dir] }
+                     when 'play_area' then ->(dir) { @hand_manager.play_areas[dir] }
                      when 'won_cards' then ->(dir) { @hand_manager.won_cards[dir] }
                      when 'hand'      then ->(dir) { @hand_manager.hands[dir] }
                      end
@@ -971,12 +1014,12 @@ class Game
         scoring_method = @scoring_instructions[step_hash['method']]
         if scoring_method.include?('card_scores')
           players_to_score.each do |dir|
-            val next_cards_to_score = cards_to_score[dir]
+            next_cards_to_score = cards_to_score[dir]
             scores[dir] = score_cards(next_cards_to_score, scoring_method['card_scores'])
           end
         elsif scoring_method.include?('defined_score')
           players_to_score.each do |dir|
-            val next_cards_to_score = cards_to_score[dir]
+            next_cards_to_score = cards_to_score[dir]
             scores[dir] = score_cards_special(next_cards_to_score, scoring_method['defined_score'])
           end
         end
@@ -1214,6 +1257,8 @@ class Game
   def check_conditional(conditional_hash)
     return true if conditional_hash.nil?
 
+    logger.debug("Checking conditional: #{conditional_hash}")
+
     comparators = conditional_hash['comparators']
     comparison = conditional_hash['comparison']
     subject_is_current_player = conditional_hash['subject'] == 'cur_player'
@@ -1275,14 +1320,15 @@ class Game
   def enact_variable_change(change_hash)
     return if change_hash.nil?
 
-    case change_hash['subject']
+    var_name_to_change = change_hash['subject']
+    case var_name_to_change
     when 'player'
       change_cur_player(change_hash)
     when 'dealer'
       change_dealer(change_hash)
     else
       if @counter_variables.include?(var_name_to_change)
-        val value_change = change_hash['value']
+        value_change = change_hash['value']
         case change_hash['action']
         when 'set'
           @counter_variables[var_name_to_change] = value_change
@@ -1292,7 +1338,7 @@ class Game
           logger.error("Unknown counter variable change type: #{change_hash['action']}")
         end
       elsif @flag_variables.include?(var_name_to_change)
-        val value_change = change_hash['value']
+        value_change = change_hash['value']
         case change_hash['action']
         when 'set'
           @flag_variables[var_name_to_change] = value_change
@@ -1314,7 +1360,7 @@ class Game
   def change_cur_player(change_hash)
     case change_hash['change']
     when 'next'
-      @cur_player = seat_placements.next(@cur_player)
+      @cur_player = @seat_placements.next(@cur_player)
     when 'last_winner'
       @cur_player = @latest_winner unless @latest_winner.nil?
     else
@@ -1328,8 +1374,8 @@ class Game
   def change_dealer(change_hash)
     case change_hash['change']
     when 'next'
-      @latest_dealer = !@latest_dealer.nil? ? seat_placements.next(@latest_dealer) : @cur_player
-      @cur_player = seat_placements.next(@latest_dealer)
+      @latest_dealer = !@latest_dealer.nil? ? @seat_placements.next(@latest_dealer) : @cur_player
+      @cur_player = @seat_placements.next(@latest_dealer)
     else
       logger.error("Unknown dealer change type: #{change_hash['change']}")
     end

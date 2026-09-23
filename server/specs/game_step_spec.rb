@@ -14,8 +14,8 @@ INSTRUCTIONS = {
     'discard' => { 'visible' => true }
   },
   'scoring' => {},
-  'extra_hands' => [],
-  'fake_hands' => []
+  'extra_hands' => ['crib'],
+  'fake_hands' => ['top_card']
 }.freeze
 
 # --- Helpers ---
@@ -80,8 +80,8 @@ end
 RSpec.describe Game do
   let(:deck) do
     [
-      Card.new('Hearts', '2'), Card.new('Hearts', '3'), Card.new('Hearts', '4'),
-      Card.new('Spades', '5'), Card.new('Spades', '6'), Card.new('Spades', '7')
+      Card.new('Spades', '7'), Card.new('Spades', '6'), Card.new('Spades', '5'),
+      Card.new('Hearts', '4'), Card.new('Hearts', '3'), Card.new('Hearts', '2')
     ]
   end
 
@@ -100,23 +100,37 @@ RSpec.describe Game do
   describe '#run_step_cleanup' do
     before do
       # Pre-populate hands with cards via hand_manager
-      game.instance_variable_get(:@hand_manager).add_card(Card.new('Hearts', '2'), 'hand', 'N')
-      game.instance_variable_get(:@hand_manager).add_card(Card.new('Spades', '5'), 'hand', 'S')
+      hm = game.instance_variable_get(:@hand_manager)
+      hm.add_card(Card.new('Hearts', '2'), 'hand', 'N')
+      hm.add_card(Card.new('Spades', '5'), 'hand', 'S')
+      hm.add_card(Card.new('Diamonds', '8'), 'play_area', 'N')
+      hm.add_card(Card.new('Diamonds', '9'), 'won_cards', 'N')
+      hm.add_card(Card.new('Diamonds', '10'), 'discard')
+      hm.add_extra_hand('crib')
+      hm.add_card(Card.new('Diamonds', '6'), 'crib')
+      hm.add_fake_hand('top_card')
+      hm.add_card(Card.new('Diamonds', '7'), 'top_card')
     end
 
     context 'when subject is "all"' do
       let(:step_hash) { { 'action' => 'cleanup', 'subject' => 'all' } }
 
-      it 'clears all player hands' do
+      it 'clears all hands' do
         game.send(:run_step_cleanup, step_hash)
         hm = game.instance_variable_get(:@hand_manager)
         expect(hm.hands['N']).to be_empty
         expect(hm.hands['S']).to be_empty
+        expect(hm.play_areas['N']).to be_empty
+        expect(hm.won_cards['N']).to be_empty
+        expect(hm.discard).to be_empty
+        expect(hm.extra_hands['crib']).to be_empty
+        expect(hm.fake_hands['top_card']).to be_empty
       end
 
       it 'returns cleared cards to the deck' do
         hm = game.instance_variable_get(:@hand_manager)
-        cards_in_hands = hm.hands.values.sum(&:size)
+        cards_in_hands = hm.hands.values.sum(&:size) + hm.play_areas.values.sum(&:size) + hm.won_cards.values.sum(&:size) +
+                         hm.extra_hands.values.sum(&:size) + hm.discard.size
         deck_size_before = hm.deck.size
         game.send(:run_step_cleanup, step_hash)
         expect(hm.deck.size).to eq(deck_size_before + cards_in_hands)
@@ -177,6 +191,43 @@ RSpec.describe Game do
       it 'clears the discard pile' do
         game.send(:run_step_cleanup, step_hash)
         expect(game.instance_variable_get(:@hand_manager).discard).to be_empty
+      end
+    end
+
+    context 'when subject is an extra hand' do
+      before do
+        hm = game.instance_variable_get(:@hand_manager)
+        hm.add_extra_hand('crib')
+        hm.add_card(Card.new('Clubs', 'King'), 'crib')
+      end
+
+      let(:step_hash) { { 'action' => 'cleanup', 'subject' => 'crib', 'subject_specifier' => nil } }
+
+      it 'clears the extra hand' do
+        game.send(:run_step_cleanup, step_hash)
+        expect(game.instance_variable_get(:@hand_manager).extra_hands['crib']).to be_empty
+      end
+    end
+
+    context 'when subject is a fake hand' do
+      before do
+        hm = game.instance_variable_get(:@hand_manager)
+        hm.add_extra_hand('top_card')
+        hm.add_card(Card.new('Clubs', 'King'), 'top_card')
+      end
+
+      let(:step_hash) { { 'action' => 'cleanup', 'subject' => 'top_card', 'subject_specifier' => nil } }
+
+      it 'clears the fake hand' do
+        game.send(:run_step_cleanup, step_hash)
+        expect(game.instance_variable_get(:@hand_manager).fake_hands['top_card']).to be_empty
+      end
+
+      it 'does not return cleared cards to the deck' do
+        hm = game.instance_variable_get(:@hand_manager)
+        deck_size_before = hm.deck.size
+        game.send(:run_step_cleanup, step_hash)
+        expect(hm.deck.size).to eq(deck_size_before)
       end
     end
 
@@ -260,6 +311,41 @@ RSpec.describe Game do
       end
     end
 
+    context 'when subject is "discard"' do
+      let(:step_hash) { { 'action' => 'shuffle', 'subject' => 'discard', 'subject_specifier' => nil } }
+
+      it 'keeps the same cards in the discard' do
+        hm = game.instance_variable_get(:@hand_manager)
+        discard_cards_before = hm.discard.sort_by(&:to_s)
+        game.send(:run_step_shuffle, step_hash)
+        expect(hm.discard.sort_by(&:to_s)).to eq(discard_cards_before)
+      end
+    end
+
+    context 'when subject is an extra hand' do
+      let(:step_hash) { { 'action' => 'shuffle', 'subject' => 'crib', 'subject_specifier' => nil } }
+
+      it 'keeps the same cards in the extra hand' do
+        hm = game.instance_variable_get(:@hand_manager)
+        hm.add_extra_hand('crib')
+        crib_cards_before = hm.extra_hands['crib'].sort_by(&:to_s)
+        game.send(:run_step_shuffle, step_hash)
+        expect(hm.extra_hands['crib'].sort_by(&:to_s)).to eq(crib_cards_before)
+      end
+    end
+
+    context 'when subject is an fake hand' do
+      let(:step_hash) { { 'action' => 'shuffle', 'subject' => 'top_card', 'subject_specifier' => nil } }
+
+      it 'keeps the same cards in the fake hand' do
+        hm = game.instance_variable_get(:@hand_manager)
+        hm.add_fake_hand('top_card')
+        top_card_cards_before = hm.fake_hands['top_card'].sort_by(&:to_s)
+        game.send(:run_step_shuffle, step_hash)
+        expect(hm.fake_hands['top_card'].sort_by(&:to_s)).to eq(top_card_cards_before)
+      end
+    end
+
     context 'when subject is unknown' do
       let(:step_hash) { { 'action' => 'shuffle', 'subject' => 'unknown_thing', 'subject_specifier' => nil } }
 
@@ -298,6 +384,11 @@ RSpec.describe Game do
   describe '#run_step_deal' do
     before do
       game.instance_variable_set(:@dealer, 'S')
+      hm = game.instance_variable_get(:@hand_manager)
+      hm.deck.replace(
+        [Card.new('Hearts', '2'), Card.new('Hearts', '3'), Card.new('Hearts', '4'), Card.new('Hearts', '5'),
+         Card.new('Hearts', '6'), Card.new('Hearts', '7'), Card.new('Hearts', '8'), Card.new('Hearts', '9'), Card.new('Hearts', '10')]
+      )
     end
 
     context 'when dealing to all hands with an amount' do
@@ -357,6 +448,33 @@ RSpec.describe Game do
         game.send(:run_step_deal, step_hash)
         hm = game.instance_variable_get(:@hand_manager)
         expect(hm.deck).to be_empty
+      end
+    end
+
+    context 'when dealing to all hands without an amount' do
+      let(:step_hash) { { 'action' => 'deal', 'subject' => 'hand', 'subject_specifier' => nil, 'amount' => nil } }
+
+      before do
+        # 5 cards between 2 players — N is left of dealer (S), so N goes first and gets the extra card
+        hm = game.instance_variable_get(:@hand_manager)
+        hm.deck.replace([
+                          Card.new('Hearts', '2'), Card.new('Hearts', '3'), Card.new('Hearts', '4'),
+                          Card.new('Hearts', '5'), Card.new('Hearts', '6')
+                        ])
+        game.instance_variable_set(:@dealer, 'S')
+      end
+
+      it 'deals until the deck is empty' do
+        game.send(:run_step_deal, step_hash)
+        hm = game.instance_variable_get(:@hand_manager)
+        expect(hm.deck).to be_empty
+      end
+
+      it 'gives the player left of the dealer the extra card' do
+        game.send(:run_step_deal, step_hash)
+        hm = game.instance_variable_get(:@hand_manager)
+        expect(hm.hands['N'].size).to eq(3)
+        expect(hm.hands['S'].size).to eq(2)
       end
     end
 
@@ -488,8 +606,11 @@ RSpec.describe Game do
   # -----------------------------------------------------------------------
 
   describe '#run_step_assign_trick' do
-    let(:north_card) { Card.new('Hearts', '2') }
-    let(:south_card) { Card.new('Hearts', 'King') }
+    low_card = Card.new('Hearts', '2')
+    high_card = Card.new('Hearts', 'King')
+
+    let(:north_card) { low_card }
+    let(:south_card) { high_card }
 
     before do
       hm = game.instance_variable_get(:@hand_manager)
@@ -499,6 +620,10 @@ RSpec.describe Game do
       game.instance_variable_set(
         :@recently_played,
         [['N', north_card], ['S', south_card]]
+      )
+      game.instance_variable_set(
+        :@trick_comparator,
+        TrickComparator.new([high_card, low_card])
       )
     end
 
